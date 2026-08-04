@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>🏆 Quadro de Recompensas</title>
+  <meta name="description" content="Quadro de recompensas mensal para filhos — acompanhe tarefas e saldos em tempo real na Smart TV ou celular.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- Background blobs animados -->
+  <div class="bg-blobs" aria-hidden="true">
+    <div class="bg-blob bg-blob-1"></div>
+    <div class="bg-blob bg-blob-2"></div>
+    <div class="bg-blob bg-blob-3"></div>
+  </div>
+
+  <!-- Header fixo -->
+  <header class="app-header" role="banner">
+    <div class="header-logo">
+      <span class="logo-icon" aria-hidden="true">🏆</span>
+      <div>
+        <h1 class="logo-text">Quadro de Recompensas</h1>
+        <span id="header-month" class="header-month">Carregando...</span>
+      </div>
+    </div>
+    <div class="header-right">
+      <div class="refresh-indicator" title="Auto-atualização a cada 30s">
+        <span class="refresh-dot" aria-hidden="true"></span>
+        <span>ao vivo</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Conteúdo principal -->
+  <main id="main-content" class="main-content" role="main">
+    <div class="loading-state">
+      <div class="spinner" role="status" aria-label="Carregando dados"></div>
+      <p>Carregando recompensas...</p>
+    </div>
+  </main>
+
+  <!-- Botão flutuante admin (FAB) -->
+  <button class="fab-admin" id="fab-admin" onclick="openAdminModal()"
+          aria-label="Abrir painel do pai" title="Painel do Pai ⚙️">
+    ⚙️
+  </button>
+
+  <!-- Modal admin -->
+  <div class="modal-overlay" id="admin-modal" role="dialog" aria-modal="true"
+       aria-label="Painel administrativo" onclick="handleModalOverlayClick(event)">
+    <div class="modal-content" id="modal-content-inner">
+
+      <!-- Tela de PIN -->
+      <div id="pin-screen" class="pin-screen">
+        <button class="modal-close" onclick="closeAdminModal()" aria-label="Fechar modal">✕</button>
+        <div class="pin-header">
+          <span class="pin-icon" aria-hidden="true">🔐</span>
+          <h2>Painel do Pai</h2>
+          <p>Digite o PIN de 4 dígitos</p>
+        </div>
+        <!-- Indicadores visuais dos dígitos -->
+        <div class="pin-dots" id="pin-dots" aria-hidden="true">
+          <span class="pin-dot" id="dot-0"></span>
+          <span class="pin-dot" id="dot-1"></span>
+          <span class="pin-dot" id="dot-2"></span>
+          <span class="pin-dot" id="dot-3"></span>
+        </div>
+        <!-- Teclado numérico gerado por JS -->
+        <div class="pin-keypad" id="pin-keypad"></div>
+      </div>
+
+      <!-- Abas admin (visível após PIN correto) -->
+      <div id="admin-tabs" class="admin-tabs" style="display:none">
+        <div class="tabs-header">
+          <button class="modal-close" onclick="closeAdminModal()" aria-label="Fechar modal">✕</button>
+          <div class="tab-buttons" role="tablist" aria-label="Seções do painel">
+            <button class="tab-btn active" id="tab-registrar" role="tab"
+                    aria-selected="true" aria-controls="panel-registrar"
+                    onclick="switchTab('registrar')">📝 Registrar</button>
+            <button class="tab-btn" id="tab-filhos" role="tab"
+                    aria-selected="false" aria-controls="panel-filhos"
+                    onclick="switchTab('filhos')">👶 Filhos</button>
+            <button class="tab-btn" id="tab-tarefas" role="tab"
+                    aria-selected="false" aria-controls="panel-tarefas"
+                    onclick="switchTab('tarefas')">📋 Tarefas</button>
+            <button class="tab-btn" id="tab-config" role="tab"
+                    aria-selected="false" aria-controls="panel-config"
+                    onclick="switchTab('config')">⚙️ Config</button>
+          </div>
+        </div>
+        <div class="tabs-content">
+          <div class="tab-panel active" id="panel-registrar" role="tabpanel"></div>
+          <div class="tab-panel"        id="panel-filhos"    role="tabpanel"></div>
+          <div class="tab-panel"        id="panel-tarefas"   role="tabpanel"></div>
+          <div class="tab-panel"        id="panel-config"    role="tabpanel"></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Notificação toast -->
+  <div class="toast" id="toast" role="alert" aria-live="assertive"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

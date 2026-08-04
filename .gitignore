@@ -1,0 +1,20 @@
+# Dependências
+node_modules/
+
+# Segurança — PIN e variáveis de ambiente (NUNCA commitar)
+.env
+
+# Backups automáticos anuais
+backups/
+
+# Dados pessoais (registros dos filhos)
+dados.json
+dados.json.bak
+dados.json.tmp
+
+# Scripts utilitários locais
+*.vbs
+
+# Logs e temporários
+*.log
+npm-debug.log*
