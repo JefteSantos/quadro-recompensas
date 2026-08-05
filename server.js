@@ -239,6 +239,20 @@ app.get('/api/estado', (req, res) => {
     saldos[filho] = calcularSaldo(data, filho, monthKey);
   });
 
+  // Para meses históricos, usa saldo congelado se disponível
+  const saldosHistorico = {};
+  const mesesHist = Object.keys(data.registros).filter(k => k !== monthKey).sort().reverse();
+  mesesHist.forEach(mes => {
+    saldosHistorico[mes] = {};
+    data.filhos.forEach(filho => {
+      if (data.saldosCongelados?.[mes]?.[filho] !== undefined) {
+        saldosHistorico[mes][filho] = data.saldosCongelados[mes][filho];
+      } else {
+        saldosHistorico[mes][filho] = calcularSaldo(data, filho, mes);
+      }
+    });
+  });
+
   res.json({
     mesAtual          : monthKey,
     valorMaximoMensal : data.valorMaximoMensal,
@@ -247,10 +261,8 @@ app.get('/api/estado', (req, res) => {
     tarefasAtivas     : data.tarefasAtivas,
     registros         : data.registros,
     saldos,
-    mesesHistorico    : Object.keys(data.registros)
-                          .filter(k => k !== monthKey)
-                          .sort()
-                          .reverse()
+    saldosHistorico,
+    mesesHistorico    : mesesHist
   });
 });
 
@@ -338,6 +350,24 @@ app.post('/api/admin/tarefa', validatePin, (req, res) => {
   } else if (acao === 'editar') {
     const idx = data.tarefas.findIndex(t => t.id === tarefa.id);
     if (idx === -1) return res.status(404).json({ erro: 'Tarefa não encontrada' });
+
+    // Se a dedução mudou, congela os saldos dos meses anteriores
+    const old = data.tarefas[idx];
+    if (tarefa.deducao !== undefined && tarefa.deducao !== old.deducao) {
+      const monthKey = currentMonthKey();
+      if (!data.saldosCongelados) data.saldosCongelados = {};
+      Object.keys(data.registros || {}).forEach(mes => {
+        if (mes >= monthKey) return; // só congela meses passados
+        if (!data.saldosCongelados[mes]) data.saldosCongelados[mes] = {};
+        data.filhos.forEach(filho => {
+          // Só congela se ainda não foi congelado
+          if (data.saldosCongelados[mes][filho] === undefined) {
+            data.saldosCongelados[mes][filho] = calcularSaldo(data, filho, mes);
+          }
+        });
+      });
+    }
+
     data.tarefas[idx] = { ...data.tarefas[idx], ...tarefa };
   } else if (acao === 'remover') {
     data.tarefas = data.tarefas.filter(t => t.id !== tarefa.id);
