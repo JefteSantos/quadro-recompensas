@@ -1,11 +1,29 @@
 # Dependências
 node_modules/
 
-# Segurança — PIN e variáveis de ambiente (NUNCA commitar)
+# Segurança — Variáveis de ambiente (NUNCA commitar)
 .env
+.env.*
+!.env.example
+
+# Chaves e credenciais do Firebase
 firebase-key.json
+*firebase*.json
 *serviceAccount*.json
+*service-account*.json
 *-adminsdk-*.json
+.firebase/
+firebase-debug.log*
+firestore-debug.log*
+ui-debug.log*
+
+# Chaves e configurações do Render / Certificados
+.render/
+*render*.key
+*render*.json
+*.pem
+*.key
+*.cert
 
 # Backups automáticos anuais
 backups/
