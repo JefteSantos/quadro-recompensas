@@ -534,6 +534,43 @@ app.post('/api/admin/config', validatePin, async (req, res) => {
   }
 });
 
+/** Importa dados.json para o Firestore ou arquivo local */
+app.post('/api/admin/importar', validatePin, async (req, res) => {
+  try {
+    const data = req.body;
+    if (!data || !Array.isArray(data.filhos) || !Array.isArray(data.tarefas)) {
+      return res.status(400).json({ erro: 'Estrutura inválida. Certifique-se de que é um arquivo dados.json válido.' });
+    }
+
+    await saveData(data);
+    console.log(`📥 Dados importados com sucesso via painel admin (${data.filhos.length} filhos, ${data.tarefas.length} tarefas)`);
+
+    res.json({
+      sucesso: true,
+      mensagem: `Importado com sucesso: ${data.filhos.length} filhos, ${data.tarefas.length} tarefas!`,
+      filhos: data.filhos.length,
+      tarefas: data.tarefas.length,
+      meses: Object.keys(data.registros || {}).length
+    });
+  } catch (err) {
+    console.error('Erro em /api/admin/importar:', err);
+    res.status(500).json({ erro: 'Erro ao importar dados: ' + err.message });
+  }
+});
+
+/** Exporta backup completo dos dados */
+app.get('/api/admin/exportar', validatePin, async (req, res) => {
+  try {
+    const data = await loadData();
+    res.setHeader('Content-Disposition', 'attachment; filename="dados-backup.json"');
+    res.setHeader('Content-Type', 'application/json');
+    res.send(JSON.stringify(data, null, 2));
+  } catch (err) {
+    console.error('Erro em /api/admin/exportar:', err);
+    res.status(500).json({ erro: 'Erro ao exportar dados' });
+  }
+});
+
 // ── Inicialização ─────────────────────────────────────────────────────────────
 function getLocalIPs() {
   const interfaces = os.networkInterfaces();

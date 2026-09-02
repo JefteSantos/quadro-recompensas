@@ -767,10 +767,28 @@ function renderAdminConfig() {
         <input id="cfg-pin" type="password" placeholder="4 dígitos" maxlength="4"
                inputmode="numeric">
         <small style="color:var(--text-3);font-size:.75rem">
-          ⚠️ O PIN é salvo no arquivo .env do servidor e não é commitado no Git.
+          ⚠️ O PIN é salvo no servidor / Firestore e não é exposto publicamente.
         </small>
       </div>
       <button class="btn-primary" onclick="saveConfig()">💾 Salvar Configurações</button>
+
+      <hr style="border:none;border-top:1px solid var(--border);margin:1.75rem 0 1.25rem 0">
+
+      <div class="form-group">
+        <label>📦 Backup e Migração de Dados</label>
+        <p style="color:var(--text-2);font-size:.82rem;margin-bottom:1rem;line-height:1.4">
+          Suba seu arquivo <code>dados.json</code> para o banco na nuvem ou baixe uma cópia de segurança a qualquer momento.
+        </p>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <label class="btn-secondary" style="cursor:pointer;margin:0">
+            📥 Importar dados.json
+            <input type="file" id="import-file-input" accept=".json" style="display:none" onchange="importBackup(event)">
+          </label>
+          <button type="button" class="btn-secondary" onclick="exportBackup()">
+            📤 Exportar Backup
+          </button>
+        </div>
+      </div>
     </div>`;
 }
 
@@ -791,6 +809,53 @@ async function saveConfig() {
     showToast('Configurações salvas!','success');
     await refresh();
   } catch(e) { showToast(e.message,'error'); }
+}
+
+async function exportBackup() {
+  try {
+    const res = await fetch('/api/admin/exportar', {
+      headers: { 'x-pin': currentPin }
+    });
+    if (!res.ok) throw new Error('Falha ao exportar backup');
+    const blob = await res.blob();
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = `quadro-recompensas-backup-${new Date().toISOString().slice(0,10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast('Backup baixado com sucesso!','success');
+  } catch(e) { showToast(e.message,'error'); }
+}
+
+async function importBackup(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+
+  if (!confirm(`Deseja importar os dados do arquivo "${file.name}" para o banco de dados? Isso atualizará filhos, tarefas e registros existentes.`)) {
+    e.target.value = '';
+    return;
+  }
+
+  const reader = new FileReader();
+  reader.onload = async (evt) => {
+    try {
+      const json = JSON.parse(evt.target.result);
+      const res  = await apiPost('/api/admin/importar', json, currentPin);
+      showToast(res.mensagem || 'Dados importados com sucesso!','success');
+      await refresh();
+      renderAdminConfig();
+    } catch(err) {
+      showToast('Erro ao importar: ' + err.message, 'error');
+    } finally {
+      e.target.value = '';
+    }
+  };
+  reader.onerror = () => {
+    showToast('Erro ao ler o arquivo selecionado', 'error');
+    e.target.value = '';
+  };
+  reader.readAsText(file);
 }
 
 /* ── Toast ──────────────────────────────────────────────────── */

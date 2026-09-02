@@ -772,6 +772,27 @@ input, select { font-family:inherit; }
 }
 .btn-danger-sm:hover { background:rgba(239,68,68,.22); }
 
+.btn-secondary {
+  background   : rgba(255,255,255,0.08);
+  border       : 1px solid var(--border);
+  color        : var(--text-1);
+  padding      : 11px 18px;
+  border-radius: var(--radius-sm);
+  font-family  : 'Outfit', sans-serif;
+  font-size    : .85rem;
+  font-weight  : 600;
+  cursor       : pointer;
+  transition   : all var(--dur) var(--ease);
+  display      : inline-flex;
+  align-items  : center;
+  gap          : 8px;
+}
+.btn-secondary:hover {
+  background   : rgba(255,255,255,0.15);
+  border-color : rgba(255,255,255,0.25);
+  transform    : translateY(-1px);
+}
+
 .input-row { display:flex; gap:10px; }
 .input-row input { flex:1; }
 
