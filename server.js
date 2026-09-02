@@ -346,9 +346,18 @@ app.get('/api/estado', async (req, res) => {
     data     = ensureTarefasAtivas(data);
     await saveData(data);
 
+    const todosMeses = Array.from(new Set([monthKey, ...Object.keys(data.registros || {})])).sort().reverse();
+    const saldosPorMes = {};
+    todosMeses.forEach(m => {
+      saldosPorMes[m] = {};
+      data.filhos.forEach(filho => {
+        saldosPorMes[m][filho] = calcularSaldo(data, filho, m);
+      });
+    });
+
     const saldos = {};
     data.filhos.forEach(filho => {
-      saldos[filho] = calcularSaldo(data, filho, monthKey);
+      saldos[filho] = saldosPorMes[monthKey][filho];
     });
 
     res.json({
@@ -360,10 +369,8 @@ app.get('/api/estado', async (req, res) => {
       tarefasAtivas     : data.tarefasAtivas,
       registros         : data.registros,
       saldos,
-      mesesHistorico    : Object.keys(data.registros)
-                            .filter(k => k !== monthKey)
-                            .sort()
-                            .reverse()
+      saldosPorMes,
+      mesesHistorico    : todosMeses
     });
   } catch (err) {
     console.error('Erro em /api/estado:', err);
@@ -373,17 +380,17 @@ app.get('/api/estado', async (req, res) => {
 
 // ── Rotas POST (todas requerem PIN) ──────────────────────────────────────────
 
-/** Registra ou limpa o status de uma tarefa para um filho num dia */
+/** Registra ou limpa o status de uma tarefa para um filho num dia (com suporte a mês) */
 app.post('/api/registrar', validatePin, async (req, res) => {
   try {
-    const { filho, dia, tarefaId, cumprida } = req.body;
+    const { filho, dia, tarefaId, cumprida, mes } = req.body;
 
     if (!filho || !dia || tarefaId === undefined || cumprida === undefined) {
       return res.status(400).json({ erro: 'Dados incompletos' });
     }
 
     let data = await loadData();
-    const monthKey = currentMonthKey();
+    const monthKey = (mes && /^\d{4}-\d{2}$/.test(mes)) ? mes : currentMonthKey();
     data = ensureMonth(data, monthKey);
 
     if (!data.filhos.includes(filho)) {
@@ -410,7 +417,7 @@ app.post('/api/registrar', validatePin, async (req, res) => {
     await saveData(data);
 
     const saldo = calcularSaldo(data, filho, monthKey);
-    res.json({ sucesso: true, saldo, registros: data.registros[monthKey][filho] });
+    res.json({ sucesso: true, saldo, mes: monthKey, registros: data.registros[monthKey][filho] });
   } catch (err) {
     console.error('Erro em /api/registrar:', err);
     res.status(500).json({ erro: 'Erro ao registrar tarefa' });

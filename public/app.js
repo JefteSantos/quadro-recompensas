@@ -13,6 +13,7 @@ let pinValue = '';        // dígitos digitados no PIN
 let pendingStatuses = {};     // { tarefaId: true|false|null }
 let isOnline = true;      // status de conexão com o servidor
 let failCount = 0;         // contagem de falhas consecutivas
+let selectedMonth = null;     // mês selecionado (null = mesAtual)
 
 // Avatares por índice
 const AVATARS = ['⭐', '🦁', '🐯', '🐻', '🦊', '🐼', '🦄', '🐸', '🦋', '🌟', '🐶', '🐱'];
@@ -131,15 +132,69 @@ function updateConnectionStatus() {
 /* ── Header ─────────────────────────────────────────────────── */
 function updateHeader() {
   if (!state) return;
-  document.getElementById('header-month').textContent = fmtMonth(state.mesAtual);
+  const mes = getSelectedMonth();
+  document.getElementById('header-month').textContent = fmtMonth(mes);
+}
+
+/** Retorna o mês selecionado ou o mês atual */
+function getSelectedMonth() {
+  return selectedMonth || state.mesAtual;
+}
+
+/** Navega para o mês anterior */
+function prevMonth() {
+  const meses = state.mesesHistorico || [state.mesAtual];
+  const atual = getSelectedMonth();
+  // Cria a chave do mês anterior
+  const [y, m] = atual.split('-').map(Number);
+  const prev = m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, '0')}`;
+  selectedMonth = prev;
+  updateHeader();
+  if (currentView === 'detail' && detailChild) renderDetail(detailChild);
+  else renderDashboard();
+}
+
+/** Navega para o próximo mês (não passa do atual) */
+function nextMonth() {
+  const mes = getSelectedMonth();
+  if (mes === state.mesAtual) return; // já está no mês atual
+  const [y, m] = mes.split('-').map(Number);
+  const next = m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`;
+  // Se voltou ao mês atual, limpa a seleção
+  selectedMonth = (next === state.mesAtual) ? null : next;
+  updateHeader();
+  if (currentView === 'detail' && detailChild) renderDetail(detailChild);
+  else renderDashboard();
+}
+
+/** Volta ao mês atual */
+function goToCurrentMonth() {
+  selectedMonth = null;
+  updateHeader();
+  if (currentView === 'detail' && detailChild) renderDetail(detailChild);
+  else renderDashboard();
+}
+
+/** Barra de navegação de mês */
+function buildMonthNav(mes, isCurrentMonth) {
+  return `
+    <div class="month-nav">
+      <button class="month-nav-btn" onclick="prevMonth()" title="Mês anterior">◀</button>
+      <div class="month-nav-label">
+        <span class="month-nav-title">${fmtMonth(mes)}</span>
+        ${!isCurrentMonth ? `<button class="month-nav-today" onclick="goToCurrentMonth()">Ir para mês atual</button>` : '<span class="month-nav-current">Mês atual</span>'}
+      </div>
+      <button class="month-nav-btn" onclick="nextMonth()" title="Próximo mês" ${isCurrentMonth ? 'disabled' : ''}>▶</button>
+    </div>`;
 }
 
 /* ── Dashboard ──────────────────────────────────────────────── */
 function renderDashboard() {
   const main = document.getElementById('main-content');
-  const dia = today();
+  const mes = getSelectedMonth();
+  const isCurrentMonth = (mes === state.mesAtual);
+  const dia = isCurrentMonth ? today() : 1;
   const diaS = String(dia);
-  const mes = state.mesAtual;
 
   if (!state.filhos.length) {
     main.innerHTML = `
@@ -152,13 +207,16 @@ function renderDashboard() {
   }
 
   main.innerHTML = `
+    ${buildMonthNav(mes, isCurrentMonth)}
     <div class="dashboard-grid" id="dashboard-grid">
-      ${state.filhos.map((filho, i) => buildChildCard(filho, i, mes, diaS)).join('')}
+      ${state.filhos.map((filho, i) => buildChildCard(filho, i, mes, diaS, isCurrentMonth)).join('')}
     </div>`;
 }
 
-function buildChildCard(filho, i, mes, diaS) {
-  const saldo = state.saldos?.[filho] !== undefined ? state.saldos[filho] : (state.modoCalculo === 'acrescimo' ? 0 : state.valorMaximoMensal);
+function buildChildCard(filho, i, mes, diaS, isCurrentMonth) {
+  const saldo = state.saldosPorMes?.[mes]?.[filho] !== undefined
+    ? state.saldosPorMes[mes][filho]
+    : (state.saldos?.[filho] !== undefined ? state.saldos[filho] : (state.modoCalculo === 'acrescimo' ? 0 : state.valorMaximoMensal));
   const p = pct(saldo, state.valorMaximoMensal);
   const cor = saldoColor(p);
   const regHoje = state.registros?.[mes]?.[filho]?.[diaS] || {};
@@ -170,6 +228,11 @@ function buildChildCard(filho, i, mes, diaS) {
 
   const cumpridas = tarefas.filter(t => t.status === true).length;
   const descumpridas = tarefas.filter(t => t.status === false).length;
+
+  // Label de "hoje" ou resumo do mês passado
+  const todayLabel = isCurrentMonth
+    ? `📅 Hoje — Dia ${today()}`
+    : `📅 Dia ${diaS} — ${fmtMonth(mes)}`;
 
   return `
     <div class="child-card" id="card-${i}" onclick="openDetail('${filho.replace(/'/g, "\\'")}')">
@@ -195,7 +258,7 @@ function buildChildCard(filho, i, mes, diaS) {
 
       <div class="today-section">
         <div class="today-header">
-          <span class="today-label">📅 Hoje — Dia ${today()}</span>
+          <span class="today-label">${todayLabel}</span>
           <span class="today-stats">${cumpridas}/${tarefas.length} ✅ · ${descumpridas} ❌</span>
         </div>
         <div class="tasks-grid">
@@ -222,8 +285,11 @@ function openDetail(filho) {
 }
 
 function renderDetail(filho) {
-  const mes = state.mesAtual;
-  const saldo = state.saldos?.[filho] !== undefined ? state.saldos[filho] : (state.modoCalculo === 'acrescimo' ? 0 : state.valorMaximoMensal);
+  const mes = getSelectedMonth();
+  const isCurrentMonth = (mes === state.mesAtual);
+  const saldo = state.saldosPorMes?.[mes]?.[filho] !== undefined
+    ? state.saldosPorMes[mes][filho]
+    : (state.saldos?.[filho] !== undefined ? state.saldos[filho] : (state.modoCalculo === 'acrescimo' ? 0 : state.valorMaximoMensal));
   const p = pct(saldo, state.valorMaximoMensal);
   const cor = saldoColor(p);
   const totalDias = daysInMonth(mes);
@@ -266,7 +332,7 @@ function renderDetail(filho) {
         totalGanhos += (t.recompensa || 0);
       }
     });
-    rows.push({ d, dS, reg, delta, isToday: d === today() });
+    rows.push({ d, dS, reg, delta, isToday: isCurrentMonth && d === today() });
   }
 
   main.innerHTML = `
@@ -277,11 +343,12 @@ function renderDetail(filho) {
           <span class="detail-avatar">${avatar(state.filhos.indexOf(filho))}</span>
           <div>
             <h2>${escapeHtml(filho)}</h2>
-            <span>${fmtMonth(mes)}</span>
           </div>
         </div>
         <div class="detail-balance" style="color:${cor}">${fmt(saldo)}</div>
       </div>
+
+      ${buildMonthNav(mes, isCurrentMonth)}
 
       <div class="monthly-grid-container">
         <div class="monthly-grid">
@@ -355,7 +422,7 @@ function renderDetail(filho) {
           <strong>-${fmt(totalDeducoes)}</strong>
         </div>
         <div class="summary-card" style="border-color:${cor}50">
-          <span>🏆 Saldo atual</span>
+          <span>🏆 Saldo ${isCurrentMonth ? 'atual' : 'final'}</span>
           <strong style="color:${cor}">${fmt(saldo)}</strong>
         </div>
       </div>
@@ -471,6 +538,7 @@ function renderAdminRegister() {
   const panel = document.getElementById('panel-registrar');
   const dia = today();
   const firstFilho = state.filhos[0];
+  const meses = state.mesesHistorico || [state.mesAtual];
 
   if (!firstFilho) {
     panel.innerHTML = '<div class="admin-form"><p style="color:var(--text-3);font-size:.85rem">Nenhum filho cadastrado.</p></div>';
@@ -479,6 +547,12 @@ function renderAdminRegister() {
 
   panel.innerHTML = `
     <div class="admin-form">
+      <div class="form-group">
+        <label>📆 Mês</label>
+        <select id="reg-mes">
+          ${meses.map(m => `<option value="${m}" ${m === state.mesAtual ? 'selected' : ''}>${fmtMonth(m)}${m === state.mesAtual ? ' (atual)' : ''}</option>`).join('')}
+        </select>
+      </div>
       <div class="form-group">
         <label>👶 Filho</label>
         <select id="reg-filho">
@@ -519,16 +593,29 @@ function renderAdminRegister() {
   // Carrega status existentes
   loadStatusForSelection();
 
+  document.getElementById('reg-mes').addEventListener('change', onRegMonthChange);
   document.getElementById('reg-filho').addEventListener('change', loadStatusForSelection);
   document.getElementById('reg-dia').addEventListener('change', loadStatusForSelection);
+}
+
+/** Quando muda o mês na aba de registrar, recarrega os dias */
+function onRegMonthChange() {
+  const mes = document.getElementById('reg-mes').value;
+  const diaSelect = document.getElementById('reg-dia');
+  const numDias = daysInMonth(mes);
+  diaSelect.innerHTML = Array.from({ length: numDias }, (_, i) => i + 1).map(d =>
+    `<option value="${d}">${d} (${weekDay(mes, d)})</option>`
+  ).join('');
+  loadStatusForSelection();
 }
 
 function loadStatusForSelection() {
   const filho = document.getElementById('reg-filho')?.value;
   const dia = document.getElementById('reg-dia')?.value;
+  const mes = document.getElementById('reg-mes')?.value || state.mesAtual;
   if (!filho || !dia) return;
 
-  const reg = state.registros?.[state.mesAtual]?.[filho]?.[dia] || {};
+  const reg = state.registros?.[mes]?.[filho]?.[dia] || {};
   pendingStatuses = {};
 
   // Carrega apenas as tarefas ativas para este filho
@@ -582,6 +669,7 @@ async function saveRegister() {
 
   const filho = document.getElementById('reg-filho').value;
   const dia = parseInt(document.getElementById('reg-dia').value);
+  const mes = document.getElementById('reg-mes')?.value || state.mesAtual;
   const btn = document.getElementById('btn-save-reg');
 
   btn.disabled = true;
@@ -591,7 +679,7 @@ async function saveRegister() {
   try {
     for (const [id, val] of Object.entries(pendingStatuses)) {
       await apiPost('/api/registrar',
-        { filho, dia, tarefaId: parseInt(id), cumprida: val },
+        { filho, dia, tarefaId: parseInt(id), cumprida: val, mes },
         currentPin
       );
       saved++;
@@ -896,6 +984,24 @@ function renderAdminConfig() {
         </small>
       </div>
       <button class="btn-primary" onclick="saveConfig()">💾 Salvar Configurações</button>
+
+      <hr style="border:none;border-top:1px solid var(--border);margin:1.75rem 0 1.25rem 0">
+
+      <div class="form-group">
+        <label>📦 Backup e Migração de Dados</label>
+        <p style="color:var(--text-2);font-size:.82rem;margin-bottom:1rem;line-height:1.4">
+          Suba seu arquivo <code>dados.json</code> para o banco na nuvem ou baixe uma cópia de segurança a qualquer momento.
+        </p>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <label class="btn-secondary" style="cursor:pointer;margin:0">
+            📥 Importar dados.json
+            <input type="file" id="import-file-input" accept=".json" style="display:none" onchange="importBackup(event)">
+          </label>
+          <button type="button" class="btn-secondary" onclick="exportBackup()">
+            📤 Exportar Backup
+          </button>
+        </div>
+      </div>
     </div>`;
 }
 
