@@ -1,7 +1,8 @@
 /**
  * Quadro de Recompensas Mensal — Servidor Express
- * PIN armazenado em .env (nunca no dados.json)
- * mDNS embutido via multicast-dns (quadro.local resolvível em todos os dispositivos)
+ * Armazenamento híbrido: Firebase Firestore (nuvem) com fallback para dados.json (local)
+ * PIN armazenado em .env / Firestore
+ * mDNS embutido via multicast-dns (quadro.local resolvível em redes locais)
  * Backup anual automático quando registros > 12 meses
  */
 require('dotenv').config();
@@ -21,12 +22,94 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
+// ── Firebase Firestore ────────────────────────────────────────────────────────
+let db              = null;
+let firestoreDocRef = null;
+
+async function initFirebase() {
+  try {
+    let serviceAccount = null;
+
+    // 1. Variável de ambiente FIREBASE_SERVICE_ACCOUNT (JSON string ou caminho para arquivo)
+    if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+      const raw = process.env.FIREBASE_SERVICE_ACCOUNT.trim();
+      if (raw.startsWith('{')) {
+        serviceAccount = JSON.parse(raw);
+      } else if (fs.existsSync(raw)) {
+        serviceAccount = JSON.parse(fs.readFileSync(raw, 'utf8'));
+      }
+    } else {
+      // 2. Arquivo local padrão firebase-key.json
+      const localKeyPath = path.join(__dirname, 'firebase-key.json');
+      if (fs.existsSync(localKeyPath)) {
+        serviceAccount = JSON.parse(fs.readFileSync(localKeyPath, 'utf8'));
+      }
+    }
+
+    if (serviceAccount) {
+      let admin;
+      try {
+        admin = require('firebase-admin');
+      } catch {
+        console.warn('⚠️  Pacote firebase-admin não instalado. Usando armazenamento local.');
+        return false;
+      }
+
+      admin.initializeApp({
+        credential: admin.credential.cert(serviceAccount)
+      });
+
+      db = admin.firestore();
+      firestoreDocRef = db.collection('quadro').doc('principal');
+      console.log('🔥 Firebase Firestore conectado com sucesso!');
+
+      // Sincroniza PIN salvo no Firestore se existir
+      try {
+        const cfgSnap = await db.collection('quadro').doc('config').get();
+        if (cfgSnap.exists && cfgSnap.data().pin) {
+          process.env.PIN = cfgSnap.data().pin;
+        }
+      } catch {}
+
+      return true;
+    }
+  } catch (err) {
+    console.error('⚠️  Falha ao conectar ao Firebase Firestore:', err.message);
+  }
+
+  console.log('📁 Operando com armazenamento local (dados.json)');
+  return false;
+}
+
 // ── Helpers de dados ─────────────────────────────────────────────────────────
+
 /**
- * Lê dados.json com fallback seguro em caso de corrupção.
- * Se o arquivo estiver corrompido, tenta restaurar do backup (.bak).
+ * Lê os dados do Firestore (se ativo) ou de dados.json com fallback seguro.
  */
-function loadData() {
+async function loadData() {
+  if (firestoreDocRef) {
+    try {
+      const snap = await firestoreDocRef.get();
+      if (snap.exists) {
+        return snap.data();
+      } else {
+        console.log('📝 Criando documento inicial no Firestore...');
+        let initialData;
+        if (fs.existsSync(DADOS_PATH)) {
+          try { initialData = JSON.parse(fs.readFileSync(DADOS_PATH, 'utf8')); } catch {}
+        }
+        if (!initialData) {
+          initialData = { valorMaximoMensal: 50, filhos: [], tarefas: [], registros: {}, tarefasAtivas: {} };
+        }
+        await firestoreDocRef.set(initialData);
+        return initialData;
+      }
+    } catch (err) {
+      console.error('⚠️  Erro ao ler do Firestore (tentando fallback local):', err.message);
+    }
+  }
+
+  // Fallback para arquivo local
   try {
     const raw = fs.readFileSync(DADOS_PATH, 'utf8');
     return JSON.parse(raw);
@@ -51,31 +134,42 @@ function loadData() {
     // Retorna estrutura mínima para não quebrar o servidor
     console.log('📝 Criando dados.json vazio...');
     const empty = { valorMaximoMensal: 50, filhos: [], tarefas: [], registros: {}, tarefasAtivas: {} };
-    saveData(empty);
+    saveDataLocal(empty);
     return empty;
   }
 }
 
-/**
- * Escrita atômica: escreve em arquivo temporário e renomeia.
- * Evita corrupção se o PC desligar no meio da gravação.
- * Também mantém um backup (.bak) do estado anterior.
- */
-function saveData(data) {
-  const tmpPath = DADOS_PATH + '.tmp';
-  const bakPath = DADOS_PATH + '.bak';
-  const content = JSON.stringify(data, null, 2);
+/** Escrita atômica em arquivo local */
+function saveDataLocal(data) {
+  try {
+    const tmpPath = DADOS_PATH + '.tmp';
+    const bakPath = DADOS_PATH + '.bak';
+    const content = JSON.stringify(data, null, 2);
 
-  // Escreve em arquivo temporário
-  fs.writeFileSync(tmpPath, content, 'utf8');
+    fs.writeFileSync(tmpPath, content, 'utf8');
 
-  // Cria backup do estado atual antes de sobrescrever
-  if (fs.existsSync(DADOS_PATH)) {
-    try { fs.copyFileSync(DADOS_PATH, bakPath); } catch { /* silencioso */ }
+    if (fs.existsSync(DADOS_PATH)) {
+      try { fs.copyFileSync(DADOS_PATH, bakPath); } catch {}
+    }
+
+    fs.renameSync(tmpPath, DADOS_PATH);
+  } catch (err) {
+    // Em ambientes efêmeros como Render, pode não ter permissão ou ser efêmero
+    console.error('⚠️  Erro ao salvar dados no disco local:', err.message);
   }
+}
 
-  // Renomeia o temporário para o definitivo (operação atômica no filesystem)
-  fs.renameSync(tmpPath, DADOS_PATH);
+/** Salva dados no Firestore e mantém cópia local */
+async function saveData(data) {
+  if (firestoreDocRef) {
+    try {
+      await firestoreDocRef.set(data);
+      return;
+    } catch (err) {
+      console.error('⚠️  Erro ao salvar no Firestore:', err.message);
+    }
+  }
+  saveDataLocal(data);
 }
 
 function currentMonthKey() {
@@ -108,16 +202,12 @@ function ensureTarefasAtivas(data) {
 
   data.filhos.forEach(filho => {
     if (!Array.isArray(data.tarefasAtivas[filho])) {
-      // Filho novo: recebe todas as tarefas
       data.tarefasAtivas[filho] = [...allIds];
     } else {
-      // Remove IDs de tarefas que foram deletadas globalmente
-      data.tarefasAtivas[filho] = data.tarefasAtivas[filho]
-        .filter(id => allIds.includes(id));
+      data.tarefasAtivas[filho] = data.tarefasAtivas[filho].filter(id => allIds.includes(id));
     }
   });
 
-  // Remove entradas de filhos que não existem mais
   Object.keys(data.tarefasAtivas).forEach(filho => {
     if (!data.filhos.includes(filho)) delete data.tarefasAtivas[filho];
   });
@@ -125,24 +215,16 @@ function ensureTarefasAtivas(data) {
   return data;
 }
 
-/** Retorna as tarefas ativas de um filho específico */
-function tarefasDoFilho(data, filho) {
-  const activeIds = data.tarefasAtivas?.[filho];
-  if (!activeIds) return data.tarefas;
-  return data.tarefas.filter(t => activeIds.includes(t.id));
-}
-
 // ── Backup anual ──────────────────────────────────────────────────────────────
 /**
  * Mantém registros de até 12 meses. Registros mais antigos são arquivados
- * em backups/ e removidos do dados.json (filhos e tarefas permanecem).
+ * em backups/ ou no Firestore e removidos do documento ativo.
  */
-function checkAnnualBackup(data) {
+async function checkAnnualBackup(data) {
   const registros = data.registros || {};
   const keys      = Object.keys(registros).sort();
   if (keys.length === 0) return data;
 
-  // Cutoff: início do mês atual menos 11 meses = janela de 12 meses
   const now       = new Date();
   const cutoff    = new Date(now.getFullYear(), now.getMonth() - 11, 1);
   const cutoffKey = `${cutoff.getFullYear()}-${String(cutoff.getMonth() + 1).padStart(2, '0')}`;
@@ -150,12 +232,6 @@ function checkAnnualBackup(data) {
   const oldKeys = keys.filter(k => k < cutoffKey);
   if (oldKeys.length === 0) return data;
 
-  // Cria diretório de backup se não existir
-  if (!fs.existsSync(BACKUP_DIR)) {
-    fs.mkdirSync(BACKUP_DIR, { recursive: true });
-  }
-
-  // Monta arquivo de backup
   const backupPayload = {
     geradoEm : new Date().toISOString(),
     filhos   : data.filhos,
@@ -168,22 +244,35 @@ function checkAnnualBackup(data) {
     delete data.registros[k];
   });
 
+  if (firestoreDocRef) {
+    try {
+      await db.collection('quadro_backups').doc(`backup-${cutoffKey}`).set(backupPayload);
+      console.log(`\n📦 Backup anual arquivado no Firestore: backup-${cutoffKey}`);
+      await saveData(data);
+      return data;
+    } catch (err) {
+      console.error('⚠️  Erro ao arquivar backup no Firestore:', err.message);
+    }
+  }
+
+  if (!fs.existsSync(BACKUP_DIR)) {
+    try { fs.mkdirSync(BACKUP_DIR, { recursive: true }); } catch {}
+  }
   const stamp      = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
   const backupFile = path.join(BACKUP_DIR, `backup-${stamp}.json`);
-  fs.writeFileSync(backupFile, JSON.stringify(backupPayload, null, 2));
+  try {
+    fs.writeFileSync(backupFile, JSON.stringify(backupPayload, null, 2));
+    console.log(`\n📦 Backup automático gerado localmente: ${path.basename(backupFile)}`);
+  } catch {}
 
-  console.log(`\n📦 Backup automático gerado: ${path.basename(backupFile)}`);
-  console.log(`   Meses arquivados: ${oldKeys.join(', ')}\n`);
-
-  saveData(data);
+  await saveData(data);
   return data;
 }
 
 // ── Cálculo de saldo ──────────────────────────────────────────────────────────
 function calcularSaldo(data, filho, monthKey) {
-  const max      = data.valorMaximoMensal;
-  const regMes   = data.registros?.[monthKey]?.[filho] || {};
-  // Só conta deduções de tarefas ATIVAS para este filho
+  const max       = data.valorMaximoMensal;
+  const regMes    = data.registros?.[monthKey]?.[filho] || {};
   const ativasIds = (data.tarefasAtivas?.[filho] || data.tarefas.map(t => t.id))
                       .map(id => String(id));
   let   deducoes = 0;
@@ -201,15 +290,10 @@ function calcularSaldo(data, filho, monthKey) {
 }
 
 // ── Middleware PIN ────────────────────────────────────────────────────────────
-/**
- * Validação de PIN usando comparação em tempo constante.
- * Previne timing attacks que poderiam revelar o PIN dígito a dígito.
- */
 function validatePin(req, res, next) {
   const pin        = req.headers['x-pin'] || '';
   const correctPin = process.env.PIN || '1234';
 
-  // Normaliza para mesmo comprimento antes de comparar
   const pinBuf     = Buffer.from(pin.padEnd(4, '\0'));
   const correctBuf = Buffer.from(correctPin.padEnd(4, '\0'));
 
@@ -223,182 +307,225 @@ function validatePin(req, res, next) {
 
 /** Health check — verifica se o servidor está online */
 app.get('/api/ping', (_req, res) => {
-  res.json({ status: 'online', timestamp: Date.now() });
+  res.json({
+    status   : 'online',
+    timestamp: Date.now(),
+    storage  : firestoreDocRef ? 'firestore' : 'local'
+  });
 });
 
-app.get('/api/estado', (req, res) => {
-  let data = loadData();
-  data     = checkAnnualBackup(data);
-  const monthKey = currentMonthKey();
-  data     = ensureMonth(data, monthKey);
-  data     = ensureTarefasAtivas(data);
-  saveData(data);
+app.get('/api/estado', async (req, res) => {
+  try {
+    let data = await loadData();
+    data     = await checkAnnualBackup(data);
+    const monthKey = currentMonthKey();
+    data     = ensureMonth(data, monthKey);
+    data     = ensureTarefasAtivas(data);
+    await saveData(data);
 
-  const saldos = {};
-  data.filhos.forEach(filho => {
-    saldos[filho] = calcularSaldo(data, filho, monthKey);
-  });
+    const saldos = {};
+    data.filhos.forEach(filho => {
+      saldos[filho] = calcularSaldo(data, filho, monthKey);
+    });
 
-  res.json({
-    mesAtual          : monthKey,
-    valorMaximoMensal : data.valorMaximoMensal,
-    filhos            : data.filhos,
-    tarefas           : data.tarefas,
-    tarefasAtivas     : data.tarefasAtivas,
-    registros         : data.registros,
-    saldos,
-    mesesHistorico    : Object.keys(data.registros)
-                          .filter(k => k !== monthKey)
-                          .sort()
-                          .reverse()
-  });
+    res.json({
+      mesAtual          : monthKey,
+      valorMaximoMensal : data.valorMaximoMensal,
+      filhos            : data.filhos,
+      tarefas           : data.tarefas,
+      tarefasAtivas     : data.tarefasAtivas,
+      registros         : data.registros,
+      saldos,
+      mesesHistorico    : Object.keys(data.registros)
+                            .filter(k => k !== monthKey)
+                            .sort()
+                            .reverse()
+    });
+  } catch (err) {
+    console.error('Erro em /api/estado:', err);
+    res.status(500).json({ erro: 'Erro interno ao obter estado' });
+  }
 });
 
 // ── Rotas POST (todas requerem PIN) ──────────────────────────────────────────
+
 /** Registra ou limpa o status de uma tarefa para um filho num dia */
-app.post('/api/registrar', validatePin, (req, res) => {
-  const { filho, dia, tarefaId, cumprida } = req.body;
+app.post('/api/registrar', validatePin, async (req, res) => {
+  try {
+    const { filho, dia, tarefaId, cumprida } = req.body;
 
-  if (!filho || !dia || tarefaId === undefined || cumprida === undefined) {
-    return res.status(400).json({ erro: 'Dados incompletos' });
-  }
-
-  let data = loadData();
-  const monthKey = currentMonthKey();
-  data = ensureMonth(data, monthKey);
-
-  if (!data.filhos.includes(filho)) {
-    return res.status(400).json({ erro: 'Filho não encontrado' });
-  }
-  if (!data.tarefas.find(t => t.id === tarefaId)) {
-    return res.status(400).json({ erro: 'Tarefa não encontrada' });
-  }
-
-  const diaStr = String(dia);
-  if (!data.registros[monthKey][filho][diaStr]) {
-    data.registros[monthKey][filho][diaStr] = {};
-  }
-
-  if (cumprida === null) {
-    // ⬜ Limpa o registro desta tarefa
-    delete data.registros[monthKey][filho][diaStr][String(tarefaId)];
-    if (Object.keys(data.registros[monthKey][filho][diaStr]).length === 0) {
-      delete data.registros[monthKey][filho][diaStr];
+    if (!filho || !dia || tarefaId === undefined || cumprida === undefined) {
+      return res.status(400).json({ erro: 'Dados incompletos' });
     }
-  } else {
-    data.registros[monthKey][filho][diaStr][String(tarefaId)] = cumprida;
+
+    let data = await loadData();
+    const monthKey = currentMonthKey();
+    data = ensureMonth(data, monthKey);
+
+    if (!data.filhos.includes(filho)) {
+      return res.status(400).json({ erro: 'Filho não encontrado' });
+    }
+    if (!data.tarefas.find(t => t.id === tarefaId)) {
+      return res.status(400).json({ erro: 'Tarefa não encontrada' });
+    }
+
+    const diaStr = String(dia);
+    if (!data.registros[monthKey][filho][diaStr]) {
+      data.registros[monthKey][filho][diaStr] = {};
+    }
+
+    if (cumprida === null) {
+      delete data.registros[monthKey][filho][diaStr][String(tarefaId)];
+      if (Object.keys(data.registros[monthKey][filho][diaStr]).length === 0) {
+        delete data.registros[monthKey][filho][diaStr];
+      }
+    } else {
+      data.registros[monthKey][filho][diaStr][String(tarefaId)] = cumprida;
+    }
+
+    await saveData(data);
+
+    const saldo = calcularSaldo(data, filho, monthKey);
+    res.json({ sucesso: true, saldo, registros: data.registros[monthKey][filho] });
+  } catch (err) {
+    console.error('Erro em /api/registrar:', err);
+    res.status(500).json({ erro: 'Erro ao registrar tarefa' });
   }
-
-  saveData(data);
-
-  const saldo = calcularSaldo(data, filho, monthKey);
-  res.json({ sucesso: true, saldo, registros: data.registros[monthKey][filho] });
 });
 
 /** Adiciona ou remove um filho */
-app.post('/api/admin/filho', validatePin, (req, res) => {
-  const { acao, nome } = req.body;
-  let data = loadData();
+app.post('/api/admin/filho', validatePin, async (req, res) => {
+  try {
+    const { acao, nome } = req.body;
+    let data = await loadData();
 
-  if (acao === 'adicionar') {
-    const n = (nome || '').trim();
-    if (!n)                      return res.status(400).json({ erro: 'Nome inválido' });
-    if (data.filhos.includes(n)) return res.status(400).json({ erro: 'Filho já existe' });
-    data.filhos.push(n);
-    data = ensureMonth(data, currentMonthKey());
-    data = ensureTarefasAtivas(data); // novo filho recebe todas as tarefas
-  } else if (acao === 'remover') {
-    data.filhos = data.filhos.filter(f => f !== nome);
-    data = ensureTarefasAtivas(data); // limpa entrada removida
-  } else {
-    return res.status(400).json({ erro: 'Ação inválida. Use: adicionar | remover' });
+    if (acao === 'adicionar') {
+      const n = (nome || '').trim();
+      if (!n)                      return res.status(400).json({ erro: 'Nome inválido' });
+      if (data.filhos.includes(n)) return res.status(400).json({ erro: 'Filho já existe' });
+      data.filhos.push(n);
+      data = ensureMonth(data, currentMonthKey());
+      data = ensureTarefasAtivas(data);
+    } else if (acao === 'remover') {
+      data.filhos = data.filhos.filter(f => f !== nome);
+      data = ensureTarefasAtivas(data);
+    } else {
+      return res.status(400).json({ erro: 'Ação inválida. Use: adicionar | remover' });
+    }
+
+    await saveData(data);
+    res.json({ sucesso: true, filhos: data.filhos });
+  } catch (err) {
+    console.error('Erro em /api/admin/filho:', err);
+    res.status(500).json({ erro: 'Erro ao processar filho' });
   }
-
-  saveData(data);
-  res.json({ sucesso: true, filhos: data.filhos });
 });
 
 /** Adiciona, edita ou remove uma tarefa */
-app.post('/api/admin/tarefa', validatePin, (req, res) => {
-  const { acao, tarefa } = req.body;
-  let data = loadData();
+app.post('/api/admin/tarefa', validatePin, async (req, res) => {
+  try {
+    const { acao, tarefa } = req.body;
+    let data = await loadData();
 
-  if (acao === 'adicionar') {
-    const novoId = data.tarefas.length > 0
-      ? Math.max(...data.tarefas.map(t => t.id)) + 1
-      : 1;
-    data.tarefas.push({
-      id     : novoId,
-      nome   : tarefa.nome,
-      icone  : tarefa.icone  || '📋',
-      deducao: parseFloat(tarefa.deducao) || 1.00
-    });
-    // Nova tarefa é adicionada a TODOS os filhos por padrão
-    data = ensureTarefasAtivas(data);
-  } else if (acao === 'editar') {
-    const idx = data.tarefas.findIndex(t => t.id === tarefa.id);
-    if (idx === -1) return res.status(404).json({ erro: 'Tarefa não encontrada' });
-    data.tarefas[idx] = { ...data.tarefas[idx], ...tarefa };
-  } else if (acao === 'remover') {
-    data.tarefas = data.tarefas.filter(t => t.id !== tarefa.id);
-    data = ensureTarefasAtivas(data); // limpa ID removido de todos os filhos
-  } else {
-    return res.status(400).json({ erro: 'Ação inválida. Use: adicionar | editar | remover' });
+    if (acao === 'adicionar') {
+      const novoId = data.tarefas.length > 0
+        ? Math.max(...data.tarefas.map(t => t.id)) + 1
+        : 1;
+      data.tarefas.push({
+        id     : novoId,
+        nome   : tarefa.nome,
+        icone  : tarefa.icone  || '📋',
+        deducao: parseFloat(tarefa.deducao) || 1.00
+      });
+      data = ensureTarefasAtivas(data);
+    } else if (acao === 'editar') {
+      const idx = data.tarefas.findIndex(t => t.id === tarefa.id);
+      if (idx === -1) return res.status(404).json({ erro: 'Tarefa não encontrada' });
+      data.tarefas[idx] = { ...data.tarefas[idx], ...tarefa };
+    } else if (acao === 'remover') {
+      data.tarefas = data.tarefas.filter(t => t.id !== tarefa.id);
+      data = ensureTarefasAtivas(data);
+    } else {
+      return res.status(400).json({ erro: 'Ação inválida. Use: adicionar | editar | remover' });
+    }
+
+    await saveData(data);
+    res.json({ sucesso: true, tarefas: data.tarefas, tarefasAtivas: data.tarefasAtivas });
+  } catch (err) {
+    console.error('Erro em /api/admin/tarefa:', err);
+    res.status(500).json({ erro: 'Erro ao processar tarefa' });
   }
-
-  saveData(data);
-  res.json({ sucesso: true, tarefas: data.tarefas, tarefasAtivas: data.tarefasAtivas });
 });
 
 /** Ativa ou desativa uma tarefa para um filho específico */
-app.post('/api/admin/tarefa-filho', validatePin, (req, res) => {
-  const { filho, tarefaId, ativo } = req.body;
-  let data = loadData();
-  data = ensureTarefasAtivas(data);
+app.post('/api/admin/tarefa-filho', validatePin, async (req, res) => {
+  try {
+    const { filho, tarefaId, ativo } = req.body;
+    let data = await loadData();
+    data = ensureTarefasAtivas(data);
 
-  if (!data.filhos.includes(filho)) {
-    return res.status(400).json({ erro: 'Filho não encontrado' });
-  }
-  if (!data.tarefas.find(t => t.id === tarefaId)) {
-    return res.status(400).json({ erro: 'Tarefa não encontrada' });
-  }
-
-  if (ativo) {
-    if (!data.tarefasAtivas[filho].includes(tarefaId)) {
-      data.tarefasAtivas[filho].push(tarefaId);
+    if (!data.filhos.includes(filho)) {
+      return res.status(400).json({ erro: 'Filho não encontrado' });
     }
-  } else {
-    data.tarefasAtivas[filho] = data.tarefasAtivas[filho].filter(id => id !== tarefaId);
-  }
+    if (!data.tarefas.find(t => t.id === tarefaId)) {
+      return res.status(400).json({ erro: 'Tarefa não encontrada' });
+    }
 
-  saveData(data);
-  res.json({ sucesso: true, tarefasAtivas: data.tarefasAtivas });
+    if (ativo) {
+      if (!data.tarefasAtivas[filho].includes(tarefaId)) {
+        data.tarefasAtivas[filho].push(tarefaId);
+      }
+    } else {
+      data.tarefasAtivas[filho] = data.tarefasAtivas[filho].filter(id => id !== tarefaId);
+    }
+
+    await saveData(data);
+    res.json({ sucesso: true, tarefasAtivas: data.tarefasAtivas });
+  } catch (err) {
+    console.error('Erro em /api/admin/tarefa-filho:', err);
+    res.status(500).json({ erro: 'Erro ao atualizar tarefa do filho' });
+  }
 });
 
 /** Altera o valor máximo mensal e/ou o PIN */
-app.post('/api/admin/config', validatePin, (req, res) => {
-  const { valorMaximoMensal, novoPin } = req.body;
-  let data = loadData();
+app.post('/api/admin/config', validatePin, async (req, res) => {
+  try {
+    const { valorMaximoMensal, novoPin } = req.body;
+    let data = await loadData();
 
-  if (valorMaximoMensal !== undefined && !isNaN(valorMaximoMensal) && valorMaximoMensal > 0) {
-    data.valorMaximoMensal = parseFloat(valorMaximoMensal);
-  }
-
-  if (novoPin && /^\d{4}$/.test(novoPin)) {
-    const envPath = path.join(__dirname, '.env');
-    // Preserva outras linhas do .env e atualiza apenas PIN
-    let envContent = fs.existsSync(envPath) ? fs.readFileSync(envPath, 'utf8') : '';
-    if (/^PIN=/m.test(envContent)) {
-      envContent = envContent.replace(/^PIN=.*/m, `PIN=${novoPin}`);
-    } else {
-      envContent += `\nPIN=${novoPin}\n`;
+    if (valorMaximoMensal !== undefined && !isNaN(valorMaximoMensal) && valorMaximoMensal > 0) {
+      data.valorMaximoMensal = parseFloat(valorMaximoMensal);
     }
-    fs.writeFileSync(envPath, envContent, 'utf8');
-    process.env.PIN = novoPin;
-  }
 
-  saveData(data);
-  res.json({ sucesso: true });
+    if (novoPin && /^\d{4}$/.test(novoPin)) {
+      process.env.PIN = novoPin;
+
+      if (db) {
+        try {
+          await db.collection('quadro').doc('config').set({ pin: novoPin }, { merge: true });
+        } catch (e) {
+          console.error('Erro ao salvar PIN no Firestore:', e.message);
+        }
+      }
+
+      try {
+        const envPath = path.join(__dirname, '.env');
+        let envContent = fs.existsSync(envPath) ? fs.readFileSync(envPath, 'utf8') : '';
+        if (/^PIN=/m.test(envContent)) {
+          envContent = envContent.replace(/^PIN=.*/m, `PIN=${novoPin}`);
+        } else {
+          envContent += `\nPIN=${novoPin}\n`;
+        }
+        fs.writeFileSync(envPath, envContent, 'utf8');
+      } catch {}
+    }
+
+    await saveData(data);
+    res.json({ sucesso: true });
+  } catch (err) {
+    console.error('Erro em /api/admin/config:', err);
+    res.status(500).json({ erro: 'Erro ao atualizar configurações' });
+  }
 });
 
 // ── Inicialização ─────────────────────────────────────────────────────────────
@@ -413,44 +540,13 @@ function getLocalIPs() {
   return ips;
 }
 
-app.listen(PORT, '0.0.0.0', () => {
-  const ips = getLocalIPs();
-  const line = '─'.repeat(52);
-  console.log(`\n┌${line}┐`);
-  console.log(`│  🏆  Quadro de Recompensas v1.1                          │`);
-  console.log(`├${line}┤`);
-  console.log(`│                                                          │`);
-  ips.forEach(ip => {
-    const url = `http://${ip}:${PORT}`;
-    console.log(`│  📺  ${url.padEnd(48)}│`);
-  });
-  console.log(`│  💻  http://localhost:${PORT}`.padEnd(55) + '│');
-  console.log(`│  🌐  http://quadro.local:${PORT}`.padEnd(55) + '│');
-  console.log(`│                                                          │`);
-  console.log(`│  Ctrl+C para parar                                       │`);
-  console.log(`└${line}┘\n`);
-
-  // Inicia mDNS para registrar quadro.local
-  startMDNS(ips[0]);
-});
-
-// ── mDNS embutido — quadro.local ────────────────────────────────────────────
-/**
- * Registra "quadro.local" na rede local via multicast DNS.
- * Funciona em: iOS, Android, macOS (nativamente), Windows 10+ (suporte nativo),
- * e Smart TVs com Android TV / Tizen / webOS.
- * Não requer instalação de software adicional como Bonjour.
- */
+// ── mDNS embutido — quadro.local (somente rede local) ───────────────────────
 function startMDNS(localIP) {
-  if (!localIP) {
-    console.log('ℹ️  Nenhum IP de rede encontrado. mDNS não iniciado.\n');
-    return;
-  }
+  if (!localIP) return;
 
   try {
     const mdns = require('multicast-dns')();
 
-    // Responde a consultas mDNS pelo hostname "quadro.local"
     mdns.on('query', (query) => {
       const answers = [];
       for (const q of query.questions) {
@@ -468,7 +564,6 @@ function startMDNS(localIP) {
       }
     });
 
-    // Anuncia proativamente na rede ao iniciar
     mdns.respond([{
       name: 'quadro.local',
       type: 'A',
@@ -476,7 +571,6 @@ function startMDNS(localIP) {
       data: localIP
     }]);
 
-    // Re-anuncia a cada 60 segundos para manter a resolução atualizada
     const announceTimer = setInterval(() => {
       mdns.respond([{
         name: 'quadro.local',
@@ -487,11 +581,8 @@ function startMDNS(localIP) {
     }, 60_000);
 
     console.log(`✅ mDNS ativo: quadro.local → ${localIP}`);
-    console.log('   📱 iOS/Android/macOS: acesse http://quadro.local:' + PORT);
-    console.log('   🖥️  Windows 10+: acesse http://quadro.local:' + PORT);
-    console.log('   📺 Smart TVs: acesse http://quadro.local:' + PORT + '\n');
+    console.log('   📱 Celular/TV: acesse http://quadro.local:' + PORT + '\n');
 
-    // Limpa recursos ao encerrar
     const cleanup = () => {
       clearInterval(announceTimer);
       mdns.destroy();
@@ -501,7 +592,41 @@ function startMDNS(localIP) {
     process.on('SIGTERM', () => { cleanup(); process.exit(0); });
 
   } catch (err) {
-    console.log('⚠️  Erro ao iniciar mDNS:', err.message);
-    console.log('   O servidor funciona normalmente via IP.\n');
+    console.log('⚠️  mDNS não iniciado:', err.message);
   }
 }
+
+// ── Start do servidor ────────────────────────────────────────────────────────
+async function startServer() {
+  await initFirebase();
+
+  app.listen(PORT, '0.0.0.0', () => {
+    const isCloud = !!(process.env.RENDER || process.env.NODE_ENV === 'production');
+    const ips = getLocalIPs();
+    const line = '─'.repeat(52);
+    console.log(`\n┌${line}┐`);
+    console.log(`│  🏆  Quadro de Recompensas v1.2                          │`);
+    console.log(`├${line}┤`);
+    console.log(`│                                                          │`);
+
+    if (!isCloud && ips.length > 0) {
+      ips.forEach(ip => {
+        const url = `http://${ip}:${PORT}`;
+        console.log(`│  📺  ${url.padEnd(48)}│`);
+      });
+      console.log(`│  💻  http://localhost:${PORT}`.padEnd(55) + '│');
+      console.log(`│  🌐  http://quadro.local:${PORT}`.padEnd(55) + '│');
+      console.log(`│                                                          │`);
+      console.log(`│  Ctrl+C para parar                                       │`);
+      console.log(`└${line}┘\n`);
+
+      startMDNS(ips[0]);
+    } else {
+      console.log(`│  ☁️   Hospedagem na Nuvem Ativa (Porta: ${String(PORT).padEnd(5)})         │`);
+      console.log(`│  💾  Armazenamento: ${(firestoreDocRef ? 'Firebase Firestore' : 'Arquivo local').padEnd(34)}│`);
+      console.log(`└${line}┘\n`);
+    }
+  });
+}
+
+startServer();

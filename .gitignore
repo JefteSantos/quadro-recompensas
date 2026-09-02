@@ -3,6 +3,9 @@ node_modules/
 
 # Segurança — PIN e variáveis de ambiente (NUNCA commitar)
 .env
+firebase-key.json
+*serviceAccount*.json
+*-adminsdk-*.json
 
 # Backups automáticos anuais
 backups/
