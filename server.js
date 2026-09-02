@@ -277,12 +277,29 @@ async function checkAnnualBackup(data) {
 
 // ── Cálculo de saldo ──────────────────────────────────────────────────────────
 function calcularSaldo(data, filho, monthKey) {
-  const max       = data.valorMaximoMensal;
+  const modo      = data.modoCalculo || 'fixo';
+  const max       = data.valorMaximoMensal || 50;
   const regMes    = data.registros?.[monthKey]?.[filho] || {};
   const ativasIds = (data.tarefasAtivas?.[filho] || data.tarefas.map(t => t.id))
                       .map(id => String(id));
-  let   deducoes = 0;
 
+  if (modo === 'acrescimo') {
+    let saldo = 0;
+    Object.values(regMes).forEach(tarefasDia => {
+      Object.entries(tarefasDia).forEach(([tarefaId, cumprida]) => {
+        if (ativasIds.includes(tarefaId)) {
+          const t = data.tarefas.find(t => t.id === parseInt(tarefaId));
+          if (t) {
+            if (cumprida === true)  saldo += (t.recompensa || 0);
+            if (cumprida === false) saldo -= (t.deducao || 0);
+          }
+        }
+      });
+    });
+    return Math.max(0, parseFloat(saldo.toFixed(2)));
+  }
+
+  let deducoes = 0;
   Object.values(regMes).forEach(tarefasDia => {
     Object.entries(tarefasDia).forEach(([tarefaId, cumprida]) => {
       if (cumprida === false && ativasIds.includes(tarefaId)) {
@@ -336,6 +353,7 @@ app.get('/api/estado', async (req, res) => {
 
     res.json({
       mesAtual          : monthKey,
+      modoCalculo       : data.modoCalculo || 'fixo',
       valorMaximoMensal : data.valorMaximoMensal,
       filhos            : data.filhos,
       tarefas           : data.tarefas,
@@ -438,16 +456,22 @@ app.post('/api/admin/tarefa', validatePin, async (req, res) => {
         ? Math.max(...data.tarefas.map(t => t.id)) + 1
         : 1;
       data.tarefas.push({
-        id     : novoId,
-        nome   : tarefa.nome,
-        icone  : tarefa.icone  || '📋',
-        deducao: parseFloat(tarefa.deducao) || 1.00
+        id        : novoId,
+        nome      : tarefa.nome,
+        icone     : tarefa.icone  || '📋',
+        deducao   : parseFloat(tarefa.deducao) || 0,
+        recompensa: parseFloat(tarefa.recompensa) || 0
       });
       data = ensureTarefasAtivas(data);
     } else if (acao === 'editar') {
       const idx = data.tarefas.findIndex(t => t.id === tarefa.id);
       if (idx === -1) return res.status(404).json({ erro: 'Tarefa não encontrada' });
-      data.tarefas[idx] = { ...data.tarefas[idx], ...tarefa };
+      data.tarefas[idx] = {
+        ...data.tarefas[idx],
+        ...tarefa,
+        deducao   : tarefa.deducao !== undefined ? parseFloat(tarefa.deducao) : data.tarefas[idx].deducao,
+        recompensa: tarefa.recompensa !== undefined ? parseFloat(tarefa.recompensa) : (data.tarefas[idx].recompensa || 0)
+      };
     } else if (acao === 'remover') {
       data.tarefas = data.tarefas.filter(t => t.id !== tarefa.id);
       data = ensureTarefasAtivas(data);
@@ -493,11 +517,15 @@ app.post('/api/admin/tarefa-filho', validatePin, async (req, res) => {
   }
 });
 
-/** Altera o valor máximo mensal e/ou o PIN */
+/** Altera o valor máximo mensal, modo de cálculo e/ou o PIN */
 app.post('/api/admin/config', validatePin, async (req, res) => {
   try {
-    const { valorMaximoMensal, novoPin } = req.body;
+    const { valorMaximoMensal, novoPin, modoCalculo } = req.body;
     let data = await loadData();
+
+    if (modoCalculo && ['fixo', 'acrescimo'].includes(modoCalculo)) {
+      data.modoCalculo = modoCalculo;
+    }
 
     if (valorMaximoMensal !== undefined && !isNaN(valorMaximoMensal) && valorMaximoMensal > 0) {
       data.valorMaximoMensal = parseFloat(valorMaximoMensal);

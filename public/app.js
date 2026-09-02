@@ -4,46 +4,46 @@
  */
 
 /* ── Estado global ──────────────────────────────────────────── */
-let state        = null;      // dados retornados por /api/estado
-let currentPin   = '';        // PIN validado
-let currentView  = 'dashboard'; // 'dashboard' | 'detail'
-let detailChild  = null;      // filho na visão de detalhe
+let state = null;      // dados retornados por /api/estado
+let currentPin = '';        // PIN validado
+let currentView = 'dashboard'; // 'dashboard' | 'detail'
+let detailChild = null;      // filho na visão de detalhe
 let refreshTimer = null;      // setInterval do auto-refresh
-let pinValue     = '';        // dígitos digitados no PIN
+let pinValue = '';        // dígitos digitados no PIN
 let pendingStatuses = {};     // { tarefaId: true|false|null }
-let isOnline     = true;      // status de conexão com o servidor
-let failCount    = 0;         // contagem de falhas consecutivas
+let isOnline = true;      // status de conexão com o servidor
+let failCount = 0;         // contagem de falhas consecutivas
 
 // Avatares por índice
-const AVATARS = ['⭐','🦁','🐯','🐻','🦊','🐼','🦄','🐸','🦋','🌟','🐶','🐱'];
+const AVATARS = ['⭐', '🦁', '🐯', '🐻', '🦊', '🐼', '🦄', '🐸', '🦋', '🌟', '🐶', '🐱'];
 
 /* ── Utilitários ────────────────────────────────────────────── */
 const fmt = v =>
-  new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format(v);
+  new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v);
 
 const monthNames = [
-  'Janeiro','Fevereiro','Março','Abril','Maio','Junho',
-  'Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'
+  'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+  'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
 ];
 
 function fmtMonth(key) {
-  const [y,m] = key.split('-').map(Number);
-  return `${monthNames[m-1]} ${y}`;
+  const [y, m] = key.split('-').map(Number);
+  return `${monthNames[m - 1]} ${y}`;
 }
 
 function daysInMonth(key) {
-  const [y,m] = key.split('-').map(Number);
-  return new Date(y,m,0).getDate();
+  const [y, m] = key.split('-').map(Number);
+  return new Date(y, m, 0).getDate();
 }
 
 function weekDay(key, day) {
-  const [y,m] = key.split('-').map(Number);
-  return ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'][new Date(y,m-1,day).getDay()];
+  const [y, m] = key.split('-').map(Number);
+  return ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'][new Date(y, m - 1, day).getDay()];
 }
 
 function today() { return new Date().getDate(); }
 
-function pct(saldo, max) { return Math.min(100, Math.round((saldo/max)*100)); }
+function pct(saldo, max) { return Math.min(100, Math.round((saldo / max) * 100)); }
 
 function saldoColor(p) {
   if (p >= 80) return 'var(--success)';
@@ -69,12 +69,16 @@ async function fetchState() {
 
 async function apiPost(url, body, pin) {
   const res = await fetch(url, {
-    method : 'POST',
-    headers: { 'Content-Type':'application/json', 'x-pin': pin || currentPin },
-    body   : JSON.stringify(body)
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-pin': pin || currentPin },
+    body: JSON.stringify(body)
   });
   const data = await res.json();
-  if (!res.ok) throw new Error(data.erro || `Erro HTTP ${res.status}`);
+  if (!res.ok) {
+    const err = new Error(data.erro || `Erro HTTP ${res.status}`);
+    err.status = res.status;
+    throw err;
+  }
   return { status: res.status, data };
 }
 
@@ -95,7 +99,7 @@ async function refresh() {
     updateHeader();
     if (currentView === 'dashboard') renderDashboard();
     else if (currentView === 'detail' && detailChild) renderDetail(detailChild);
-  } catch(e) {
+  } catch (e) {
     failCount++;
     console.error('Erro ao atualizar:', e);
     if (failCount >= 2 && isOnline) {
@@ -107,7 +111,7 @@ async function refresh() {
 
 /** Atualiza o indicador visual de conexão no header */
 function updateConnectionStatus() {
-  const dot  = document.querySelector('.refresh-dot');
+  const dot = document.querySelector('.refresh-dot');
   const text = document.querySelector('.refresh-indicator > span:last-child');
   if (!dot || !text) return;
 
@@ -132,10 +136,10 @@ function updateHeader() {
 
 /* ── Dashboard ──────────────────────────────────────────────── */
 function renderDashboard() {
-  const main  = document.getElementById('main-content');
-  const dia   = today();
-  const diaS  = String(dia);
-  const mes   = state.mesAtual;
+  const main = document.getElementById('main-content');
+  const dia = today();
+  const diaS = String(dia);
+  const mes = state.mesAtual;
 
   if (!state.filhos.length) {
     main.innerHTML = `
@@ -154,21 +158,21 @@ function renderDashboard() {
 }
 
 function buildChildCard(filho, i, mes, diaS) {
-  const saldo    = state.saldos[filho] ?? state.valorMaximoMensal;
-  const p        = pct(saldo, state.valorMaximoMensal);
-  const cor      = saldoColor(p);
-  const regHoje  = state.registros?.[mes]?.[filho]?.[diaS] || {};
+  const saldo = state.saldos?.[filho] !== undefined ? state.saldos[filho] : (state.modoCalculo === 'acrescimo' ? 0 : state.valorMaximoMensal);
+  const p = pct(saldo, state.valorMaximoMensal);
+  const cor = saldoColor(p);
+  const regHoje = state.registros?.[mes]?.[filho]?.[diaS] || {};
   // Só mostra tarefas ativas para este filho
-  const tarefas  = getActiveTasks(filho).map(t => ({
+  const tarefas = getActiveTasks(filho).map(t => ({
     ...t, status: Object.prototype.hasOwnProperty.call(regHoje, String(t.id))
-                    ? regHoje[String(t.id)] : undefined
+      ? regHoje[String(t.id)] : undefined
   }));
 
-  const cumpridas   = tarefas.filter(t => t.status === true).length;
-  const descumpridas= tarefas.filter(t => t.status === false).length;
+  const cumpridas = tarefas.filter(t => t.status === true).length;
+  const descumpridas = tarefas.filter(t => t.status === false).length;
 
   return `
-    <div class="child-card" id="card-${i}" onclick="openDetail('${filho.replace(/'/g,"\\'")}')">
+    <div class="child-card" id="card-${i}" onclick="openDetail('${filho.replace(/'/g, "\\'")}')">
       <div class="card-glow" style="--glow-color:${cor}40"></div>
 
       <div class="card-header">
@@ -181,7 +185,7 @@ function buildChildCard(filho, i, mes, diaS) {
 
       <div class="balance-section">
         <div class="balance-amount" style="color:${cor}">${fmt(saldo)}</div>
-        <div class="balance-label">de ${fmt(state.valorMaximoMensal)}</div>
+        <div class="balance-label">${state.modoCalculo === 'acrescimo' ? 'meta' : 'de'} ${fmt(state.valorMaximoMensal)}</div>
         <div class="progress-bar">
           <div class="progress-fill"
                style="width:${p}%;background:${cor};box-shadow:0 0 10px ${cor}60">
@@ -196,10 +200,10 @@ function buildChildCard(filho, i, mes, diaS) {
         </div>
         <div class="tasks-grid">
           ${tarefas.map(t => `
-            <div class="task-chip ${t.status===true?'done':t.status===false?'missed':''}">
+            <div class="task-chip ${t.status === true ? 'done' : t.status === false ? 'missed' : ''}">
               <span class="task-icon">${t.icone}</span>
               <span class="task-name">${escapeHtml(t.nome)}</span>
-              <span class="task-status">${t.status===true?'🟢':t.status===false?'🔴':'⬜'}</span>
+              <span class="task-status">${t.status === true ? '🟢' : t.status === false ? '🔴' : '⬜'}</span>
             </div>`).join('')}
         </div>
       </div>
@@ -218,34 +222,51 @@ function openDetail(filho) {
 }
 
 function renderDetail(filho) {
-  const mes      = state.mesAtual;
-  const saldo    = state.saldos[filho] ?? state.valorMaximoMensal;
-  const p        = pct(saldo, state.valorMaximoMensal);
-  const cor      = saldoColor(p);
-  const totalDias= daysInMonth(mes);
-  const regMes   = state.registros?.[mes]?.[filho] || {};
-  const numTar   = state.tarefas.length;
-  const main     = document.getElementById('main-content');
+  const mes = state.mesAtual;
+  const saldo = state.saldos?.[filho] !== undefined ? state.saldos[filho] : (state.modoCalculo === 'acrescimo' ? 0 : state.valorMaximoMensal);
+  const p = pct(saldo, state.valorMaximoMensal);
+  const cor = saldoColor(p);
+  const totalDias = daysInMonth(mes);
+  const regMes = state.registros?.[mes]?.[filho] || {};
+  const tarefasFiltradas = getActiveTasks(filho);
+  const numTar = tarefasFiltradas.length;
+  const main = document.getElementById('main-content');
 
   // Define colunas do grid via CSS variable
   document.documentElement.style.setProperty(
     '--grid-cols', `80px repeat(${numTar},minmax(48px,1fr)) 90px`
   );
 
-  const deducaoTotal = state.valorMaximoMensal - saldo;
-  // Só exibe tarefas ativas para este filho no grid
-  const tarefasFiltradas = getActiveTasks(filho);
+  const modo = state.modoCalculo || 'fixo';
+  let totalDeducoes = 0;
+  let totalGanhos = 0;
 
   // Monta linhas
   const rows = [];
   for (let d = 1; d <= totalDias; d++) {
-    const dS  = String(d);
+    const dS = String(d);
     const reg = regMes[dS] || {};
-    let ded   = 0;
+    let delta = 0; // Para o dia
+
     state.tarefas.forEach(t => {
-      if (reg[String(t.id)] === false) ded += t.deducao;
+      const isFilhoAtivo = (state.tarefasAtivas?.[filho] || state.tarefas.map(x => x.id)).includes(t.id);
+      if (!isFilhoAtivo) return;
+
+      const rec = reg[String(t.id)];
+      if (rec === false) {
+        if (modo === 'acrescimo') {
+          delta -= t.deducao;
+          totalDeducoes += t.deducao;
+        } else {
+          delta -= t.deducao; // Para o modo fixo, delta negativo representa dedução
+          totalDeducoes += t.deducao;
+        }
+      } else if (rec === true && modo === 'acrescimo') {
+        delta += (t.recompensa || 0);
+        totalGanhos += (t.recompensa || 0);
+      }
     });
-    rows.push({ d, dS, reg, ded, isToday: d === today() });
+    rows.push({ d, dS, reg, delta, isToday: d === today() });
   }
 
   main.innerHTML = `
@@ -278,39 +299,60 @@ function renderDetail(filho) {
 
           <!-- Linhas -->
           ${rows.map(r => {
-            let ded = 0;
-            tarefasFiltradas.forEach(t => {
-              if (r.reg[String(t.id)] === false) ded += t.deducao;
-            });
-            r.ded = ded;
-            return `
-            <div class="grid-row${r.isToday?' is-today':''}${!Object.keys(r.reg).length&&!r.isToday?' empty-row':''}">
+    let cellContent = '—';
+    let cellClass = '';
+
+    if (modo === 'acrescimo') {
+      if (r.delta > 0) {
+        cellContent = `+${fmt(r.delta)}`;
+        cellClass = 'has-reward'; // Classe para verde
+      } else if (r.delta < 0) {
+        cellContent = `${fmt(r.delta)}`;
+        cellClass = 'has-deduc'; // Classe para vermelho
+      }
+    } else {
+      // Modo fixo
+      if (r.delta < 0) {
+        cellContent = `${fmt(r.delta)}`; // já é negativo
+        cellClass = 'has-deduc';
+      }
+    }
+
+    return `
+            <div class="grid-row${r.isToday ? ' is-today' : ''}${!Object.keys(r.reg).length && !r.isToday ? ' empty-row' : ''}">
               <div class="grid-day-cell">
                 <span class="day-number">${r.d}</span>
-                <span class="day-name">${weekDay(mes,r.d)}</span>
+                <span class="day-name">${weekDay(mes, r.d)}</span>
               </div>
               ${tarefasFiltradas.map(t => {
-                const st = Object.prototype.hasOwnProperty.call(r.reg, String(t.id))
-                             ? r.reg[String(t.id)] : undefined;
-                return `<div class="grid-task-cell ${st===true?'done':st===false?'missed':'pending'}">
-                          ${st===true?'🟢':st===false?'🔴':'⬜'}
+      const st = Object.prototype.hasOwnProperty.call(r.reg, String(t.id))
+        ? r.reg[String(t.id)] : undefined;
+      return `<div class="grid-task-cell ${st === true ? 'done' : st === false ? 'missed' : 'pending'}">
+                          ${st === true ? '🟢' : st === false ? '🔴' : '⬜'}
                         </div>`;
-              }).join('')}
-              <div class="grid-deduc-cell${ded>0?' has-deduc':''}">
-                ${ded>0 ? `-${fmt(ded)}` : '—'}
+    }).join('')}
+              <div class="grid-deduc-cell ${cellClass}">
+                ${cellContent}
               </div>
-            </div>`;}).join('')}
+            </div>`;
+  }).join('')}
         </div>
       </div>
 
       <div class="detail-summary">
         <div class="summary-card">
-          <span>💰 Máximo mensal</span>
+          <span>${modo === 'acrescimo' ? '🎯 Meta mensal' : '💰 Máximo mensal'}</span>
           <strong>${fmt(state.valorMaximoMensal)}</strong>
         </div>
+        ${modo === 'acrescimo' ? `
+        <div class="summary-card" style="border-color:var(--success)">
+          <span>📈 Total ganho</span>
+          <strong style="color:var(--success)">+${fmt(totalGanhos)}</strong>
+        </div>
+        ` : ''}
         <div class="summary-card s-danger">
-          <span>📉 Total de deduções</span>
-          <strong>-${fmt(deducaoTotal)}</strong>
+          <span>📉 Total deduções</span>
+          <strong>-${fmt(totalDeducoes)}</strong>
         </div>
         <div class="summary-card" style="border-color:${cor}50">
           <span>🏆 Saldo atual</span>
@@ -346,7 +388,7 @@ function openAdminModal() {
 function closeAdminModal() {
   document.getElementById('admin-modal').classList.remove('open');
   currentPin = '';
-  pinValue   = '';
+  pinValue = '';
 }
 
 function handleModalOverlayClick(e) {
@@ -355,9 +397,9 @@ function handleModalOverlayClick(e) {
 
 /* ── Teclado PIN ────────────────────────────────────────────── */
 function buildPinKeypad() {
-  const keys = ['1','2','3','4','5','6','7','8','9','','0','⌫'];
+  const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '', '0', '⌫'];
   document.getElementById('pin-keypad').innerHTML = keys.map(k => {
-    if (k === '')  return `<button class="key-btn empty" disabled aria-hidden="true"></button>`;
+    if (k === '') return `<button class="key-btn empty" disabled aria-hidden="true"></button>`;
     if (k === '⌫') return `<button class="key-btn del-btn" onclick="pinDel()" aria-label="Apagar">⌫</button>`;
     return `<button class="key-btn" onclick="pinPress('${k}')" aria-label="${k}">${k}</button>`;
   }).join('');
@@ -371,12 +413,12 @@ function pinPress(d) {
 }
 
 function pinDel() {
-  pinValue = pinValue.slice(0,-1);
+  pinValue = pinValue.slice(0, -1);
   updatePinDots();
 }
 
 function updatePinDots() {
-  for (let i=0; i<4; i++) {
+  for (let i = 0; i < 4; i++) {
     document.getElementById(`dot-${i}`)
       ?.classList.toggle('filled', i < pinValue.length);
   }
@@ -386,23 +428,23 @@ async function submitPin() {
   if (pinValue.length !== 4) return;
 
   try {
-    const { status } = await apiPost('/api/admin/config', {}, pinValue);
-    if (status === 401) {
-      showToast('PIN incorreto!','error');
+    await apiPost('/api/admin/config', {}, pinValue);
+    currentPin = pinValue;
+    document.getElementById('pin-screen').style.display = 'none';
+    document.getElementById('admin-tabs').style.display = 'flex';
+    switchTab('registrar');
+  } catch (e) {
+    if (e.status === 401) {
+      showToast('PIN incorreto!', 'error');
       pinValue = '';
       updatePinDots();
       document.getElementById('pin-dots').classList.add('shake');
-      setTimeout(()=>document.getElementById('pin-dots').classList.remove('shake'),450);
-      return;
+      setTimeout(() => document.getElementById('pin-dots').classList.remove('shake'), 450);
+    } else {
+      showToast('Erro ao validar PIN', 'error');
+      pinValue = '';
+      updatePinDots();
     }
-    currentPin = pinValue;
-    document.getElementById('pin-screen').style.display  = 'none';
-    document.getElementById('admin-tabs').style.display  = 'flex';
-    switchTab('registrar');
-  } catch(e) {
-    showToast('Erro ao validar PIN','error');
-    pinValue = '';
-    updatePinDots();
   }
 }
 
@@ -417,9 +459,9 @@ function switchTab(tab) {
   });
   const renders = {
     registrar: renderAdminRegister,
-    filhos   : renderAdminFilhos,
-    tarefas  : renderAdminTarefas,
-    config   : renderAdminConfig
+    filhos: renderAdminFilhos,
+    tarefas: renderAdminTarefas,
+    config: renderAdminConfig
   };
   renders[tab]?.();
 }
@@ -427,7 +469,7 @@ function switchTab(tab) {
 /* ── Aba Registrar ──────────────────────────────────────────── */
 function renderAdminRegister() {
   const panel = document.getElementById('panel-registrar');
-  const dia   = today();
+  const dia = today();
   const firstFilho = state.filhos[0];
 
   if (!firstFilho) {
@@ -440,21 +482,21 @@ function renderAdminRegister() {
       <div class="form-group">
         <label>👶 Filho</label>
         <select id="reg-filho">
-          ${state.filhos.map(f=>`<option value="${escapeHtml(f)}">${escapeHtml(f)}</option>`).join('')}
+          ${state.filhos.map(f => `<option value="${escapeHtml(f)}">${escapeHtml(f)}</option>`).join('')}
         </select>
       </div>
       <div class="form-group">
         <label>📅 Dia do mês</label>
         <select id="reg-dia">
-          ${Array.from({length:daysInMonth(state.mesAtual)},(_,i)=>i+1).map(d=>`
-            <option value="${d}" ${d===dia?'selected':''}>${d} (${weekDay(state.mesAtual,d)})</option>
+          ${Array.from({ length: daysInMonth(state.mesAtual) }, (_, i) => i + 1).map(d => `
+            <option value="${d}" ${d === dia ? 'selected' : ''}>${d} (${weekDay(state.mesAtual, d)})</option>
           `).join('')}
         </select>
       </div>
       <div class="form-group">
         <label>✅ Tarefas — clique para marcar o status</label>
         <div class="task-checklist" id="task-checklist">
-          ${getActiveTasks(firstFilho).map(t=>`
+          ${getActiveTasks(firstFilho).map(t => `
             <div class="task-check-item">
               <span class="task-check-icon">${t.icone}</span>
               <span class="task-check-name">${escapeHtml(t.nome)}</span>
@@ -478,12 +520,12 @@ function renderAdminRegister() {
   loadStatusForSelection();
 
   document.getElementById('reg-filho').addEventListener('change', loadStatusForSelection);
-  document.getElementById('reg-dia'  ).addEventListener('change', loadStatusForSelection);
+  document.getElementById('reg-dia').addEventListener('change', loadStatusForSelection);
 }
 
 function loadStatusForSelection() {
   const filho = document.getElementById('reg-filho')?.value;
-  const dia   = document.getElementById('reg-dia')?.value;
+  const dia = document.getElementById('reg-dia')?.value;
   if (!filho || !dia) return;
 
   const reg = state.registros?.[state.mesAtual]?.[filho]?.[dia] || {};
@@ -493,7 +535,7 @@ function loadStatusForSelection() {
   getActiveTasks(filho).forEach(t => {
     const id = String(t.id);
     pendingStatuses[t.id] = Object.prototype.hasOwnProperty.call(reg, id)
-                              ? reg[id] : null;
+      ? reg[id] : null;
   });
 
   // Rebuildlist of task check items when filho changes
@@ -527,9 +569,9 @@ function setStatus(tarefaId, val) {
 function refreshStatusButtons() {
   state.tarefas.forEach(t => {
     const v = pendingStatuses[t.id];
-    document.getElementById(`sbtn-done-${t.id}`)?.classList.toggle('active', v===true);
-    document.getElementById(`sbtn-miss-${t.id}`)?.classList.toggle('active', v===false);
-    document.getElementById(`sbtn-clr-${t.id}`) ?.classList.toggle('active', v===null);
+    document.getElementById(`sbtn-done-${t.id}`)?.classList.toggle('active', v === true);
+    document.getElementById(`sbtn-miss-${t.id}`)?.classList.toggle('active', v === false);
+    document.getElementById(`sbtn-clr-${t.id}`)?.classList.toggle('active', v === null);
   });
 }
 
@@ -539,27 +581,27 @@ async function saveRegister() {
   saveDebounce = true;
 
   const filho = document.getElementById('reg-filho').value;
-  const dia   = parseInt(document.getElementById('reg-dia').value);
-  const btn   = document.getElementById('btn-save-reg');
+  const dia = parseInt(document.getElementById('reg-dia').value);
+  const btn = document.getElementById('btn-save-reg');
 
-  btn.disabled    = true;
+  btn.disabled = true;
   btn.textContent = '⏳ Salvando...';
 
   let saved = 0;
   try {
     for (const [id, val] of Object.entries(pendingStatuses)) {
       await apiPost('/api/registrar',
-        { filho, dia, tarefaId:parseInt(id), cumprida:val },
+        { filho, dia, tarefaId: parseInt(id), cumprida: val },
         currentPin
       );
       saved++;
     }
     showToast(`${saved} tarefa(s) salva(s)!`, 'success');
     await refresh();
-  } catch(e) {
+  } catch (e) {
     showToast(e.message, 'error');
   } finally {
-    btn.disabled    = false;
+    btn.disabled = false;
     btn.textContent = '💾 Salvar Registros';
     setTimeout(() => { saveDebounce = false; }, 800);
   }
@@ -571,13 +613,13 @@ function renderAdminFilhos() {
     <div class="admin-form">
       <div class="current-list">
         ${state.filhos.length
-          ? state.filhos.map(f => `
+      ? state.filhos.map(f => `
               <div class="list-item">
                 <span>${escapeHtml(f)}</span>
                 <button class="btn-danger-sm"
                         onclick="removeFilho('${escapeHtml(f)}')">🗑️ Remover</button>
               </div>`).join('')
-          : '<p style="color:var(--text-3);font-size:.85rem">Nenhum filho cadastrado.</p>'}
+      : '<p style="color:var(--text-3);font-size:.85rem">Nenhum filho cadastrado.</p>'}
       </div>
       <div class="form-group">
         <label>➕ Adicionar filho</label>
@@ -592,23 +634,23 @@ function renderAdminFilhos() {
 
 async function addFilho() {
   const nome = document.getElementById('inp-novo-filho').value.trim();
-  if (!nome) return showToast('Digite um nome','error');
+  if (!nome) return showToast('Digite um nome', 'error');
   try {
-    await apiPost('/api/admin/filho',{acao:'adicionar',nome},currentPin);
-    showToast(`${nome} adicionado!`,'success');
+    await apiPost('/api/admin/filho', { acao: 'adicionar', nome }, currentPin);
+    showToast(`${nome} adicionado!`, 'success');
     await refresh();
     renderAdminFilhos();
-  } catch(e) { showToast(e.message,'error'); }
+  } catch (e) { showToast(e.message, 'error'); }
 }
 
 async function removeFilho(nome) {
   if (!confirm(`Remover "${nome}"?\n\nOs registros já gravados serão mantidos no histórico.`)) return;
   try {
-    await apiPost('/api/admin/filho',{acao:'remover',nome},currentPin);
-    showToast(`${nome} removido`,'success');
+    await apiPost('/api/admin/filho', { acao: 'remover', nome }, currentPin);
+    showToast(`${nome} removido`, 'success');
     await refresh();
     renderAdminFilhos();
-  } catch(e) { showToast(e.message,'error'); }
+  } catch (e) { showToast(e.message, 'error'); }
 }
 
 /* ── Aba Tarefas ────────────────────────────────────────────── */
@@ -617,26 +659,29 @@ function renderAdminTarefas() {
     <div class="admin-form">
       <div class="current-list">
         ${state.tarefas.length
-          ? state.tarefas.map(t => {
-              // Mostra quais filhos têm esta tarefa ativa
-              const toggles = state.filhos.map(filho => {
-                const ativo = (state.tarefasAtivas?.[filho] || []).includes(t.id);
-                return `<button
-                  class="child-task-toggle ${ativo?'on':'off'}"
+      ? state.tarefas.map(t => {
+        // Mostra quais filhos têm esta tarefa ativa
+        const toggles = state.filhos.map(filho => {
+          const ativo = (state.tarefasAtivas?.[filho] || []).includes(t.id);
+          return `<button
+                  class="child-task-toggle ${ativo ? 'on' : 'off'}"
                   onclick="toggleTarefaFilho('${escapeHtml(filho)}',${t.id},${!ativo})"
-                  title="${ativo?'Remover de':'Adicionar a'} ${escapeHtml(filho)}">
+                  title="${ativo ? 'Remover de' : 'Adicionar a'} ${escapeHtml(filho)}">
                   ${avatar(state.filhos.indexOf(filho))} ${escapeHtml(filho)}
-                  <span class="toggle-badge">${ativo?'✅':'❌'}</span>
+                  <span class="toggle-badge">${ativo ? '✅' : '❌'}</span>
                 </button>`;
-              }).join('');
+        }).join('');
 
-              return `
+        return `
               <div class="list-item tarefa-item">
                 <div class="tarefa-main">
                   <span class="task-list-icon">${t.icone}</span>
                   <div class="task-list-info">
                     <strong>${escapeHtml(t.nome)}</strong>
-                    <small>Dedução: -${fmt(t.deducao)}</small>
+                    <div style="display:flex; gap:12px; margin-top:2px; flex-wrap:wrap;">
+                      <small style="color:var(--success)">🟢 Recompensa: +${fmt(t.recompensa || 0)}</small>
+                      <small style="color:var(--danger)">🔴 Dedução: -${fmt(t.deducao || 0)}</small>
+                    </div>
                   </div>
                   <button class="btn-primary-sm" onclick="editTarefa(${t.id})" style="background:var(--bg-card); color:var(--text-1); border:1px solid var(--border)">✏️</button>
                   <button class="btn-danger-sm" onclick="removeTarefa(${t.id})">🗑️</button>
@@ -647,31 +692,81 @@ function renderAdminTarefas() {
                   ${toggles}
                 </div>` : ''}
               </div>`;
-            }).join('')
-          : '<p style="color:var(--text-3);font-size:.85rem">Nenhuma tarefa cadastrada.</p>'}
+      }).join('')
+      : '<p style="color:var(--text-3);font-size:.85rem">Nenhuma tarefa cadastrada.</p>'}
       </div>
       <div class="form-group">
-        <label>➕ Nova / Editar tarefa</label>
-        <div class="task-form-grid">
-          <input id="inp-tar-nome"   type="text"   placeholder="Nome da tarefa" maxlength="50">
-          <input id="inp-tar-icone"  type="text"   placeholder="Emoji 📋" maxlength="5">
-          <input id="inp-tar-ded"    type="number" placeholder="R$ dedução" step="0.50" min="0">
-          
+        <label id="lbl-tar-form-title">➕ Nova / Editar tarefa</label>
+        <div class="task-form-box">
+          <div class="form-row">
+            <div class="form-group flex-2">
+              <label>📛 Nome da Tarefa</label>
+              <input id="inp-tar-nome" type="text" placeholder="Ex: Escovar os dentes" maxlength="50">
+            </div>
+            <div class="form-group flex-1">
+              <label>🎨 Emoji</label>
+              <input id="inp-tar-icone" type="text" placeholder="📋" maxlength="5">
+            </div>
+          </div>
+
+          <div class="form-row" style="margin-top:10px;">
+            <div class="form-group flex-1">
+              <label style="color:var(--success)">🟢 Recompensa (+R$)</label>
+              <input id="inp-tar-rec" type="number" placeholder="0.00" step="0.25" min="0">
+              <small style="font-size:.7rem; color:var(--text-3)">Valor ganho no modo acréscimo</small>
+            </div>
+            <div class="form-group flex-1">
+              <label style="color:var(--danger)">🔴 Dedução (-R$)</label>
+              <input id="inp-tar-ded" type="number" placeholder="1.00" step="0.25" min="0">
+              <small style="font-size:.7rem; color:var(--text-3)">Valor descontado ao falhar</small>
+            </div>
+          </div>
+
           <!-- Quadro de sugestão de emojis -->
-          <div style="grid-column: 1 / -1; display: flex; gap: 10px; font-size: 1.3rem; flex-wrap: wrap; margin: 4px 0 8px;">
-            ${['📋','🛏️','🦷','📚','🧹','🐶','🍽️','🧸','🚿','🚮','⏰','🎮','⚽'].map(e => 
-              `<span style="cursor:pointer; transition:transform 0.2s;" onclick="document.getElementById('inp-tar-icone').value='${e}'" onmouseover="this.style.transform='scale(1.2)'" onmouseout="this.style.transform='scale(1)'">${e}</span>`
-            ).join('')}
+          <div style="display: flex; gap: 10px; font-size: 1.3rem; flex-wrap: wrap; margin: 12px 0 8px;">
+            ${['📋', '🛏️', '🦷', '📚', '🧹', '🐶', '🍽️', '🧸', '🚿', '🚮', '⏰', '🎮', '⚽'].map(e =>
+        `<span style="cursor:pointer; transition:transform 0.2s;" onclick="document.getElementById('inp-tar-icone').value='${e}'" onmouseover="this.style.transform='scale(1.2)'" onmouseout="this.style.transform='scale(1)'">${e}</span>`
+      ).join('')}
             <small style="color:var(--text-3); font-size:0.75rem; margin-left:auto; align-self:center;">Dica: Tecle <b>Win + .</b></small>
           </div>
 
-          <div style="grid-column: 1 / -1; display: flex; gap: 10px;">
+          <div style="display: flex; gap: 10px; margin-top:10px;">
             <button id="btn-add-tarefa" class="btn-primary" onclick="addTarefa()">➕ Adicionar Tarefa</button>
             <button id="btn-cancel-edit" class="btn-primary" onclick="cancelEditTarefa()" style="display:none; background:var(--bg-card); color:var(--text-1); border:1px solid var(--border)">❌ Cancelar</button>
           </div>
         </div>
       </div>
+      
+      ${renderTaskWarning()}
+
     </div>`;
+}
+
+function renderTaskWarning() {
+  if (state.modoCalculo !== 'acrescimo') return '';
+  const diasMes = daysInMonth(state.mesAtual);
+  let hasWarning = false;
+  let warningsHTML = state.filhos.map(filho => {
+    let maxGanhos = 0;
+    getActiveTasks(filho).forEach(t => {
+      maxGanhos += (t.recompensa || 0);
+    });
+    maxGanhos *= diasMes;
+    if (maxGanhos > state.valorMaximoMensal) {
+      hasWarning = true;
+      return `<div><strong>${escapeHtml(filho)}:</strong> potencial de +${fmt(maxGanhos)} (meta é ${fmt(state.valorMaximoMensal)})</div>`;
+    }
+    return '';
+  }).join('');
+
+  if (!hasWarning) return '';
+
+  return `
+    <div style="background: var(--warning); color: #000; padding: 12px; border-radius: 8px; margin-top: 15px; font-size: 0.85rem;">
+      <strong>⚠️ Aviso:</strong> As recompensas configuradas podem ultrapassar o valor máximo mensal configurado.
+      ${warningsHTML}
+    </div>
+  `;
 }
 
 let editingTarefaId = null;
@@ -681,13 +776,16 @@ function editTarefa(id) {
   if (!t) return;
   document.getElementById('inp-tar-nome').value = t.nome;
   document.getElementById('inp-tar-icone').value = t.icone;
-  document.getElementById('inp-tar-ded').value = t.deducao;
-  
+  document.getElementById('inp-tar-ded').value = t.deducao !== undefined ? t.deducao : 1.0;
+  document.getElementById('inp-tar-rec').value = t.recompensa || 0;
+
   editingTarefaId = id;
   const btn = document.getElementById('btn-add-tarefa');
   btn.textContent = '💾 Salvar Alterações';
   document.getElementById('btn-cancel-edit').style.display = 'block';
-  
+  const titleEl = document.getElementById('lbl-tar-form-title');
+  if (titleEl) titleEl.textContent = `✏️ Editando: ${t.nome}`;
+
   // Rola a tela até o formulário para o usuário ver no celular
   document.getElementById('inp-tar-nome').focus();
   document.getElementById('inp-tar-nome').scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -698,40 +796,46 @@ function cancelEditTarefa() {
   document.getElementById('inp-tar-nome').value = '';
   document.getElementById('inp-tar-icone').value = '';
   document.getElementById('inp-tar-ded').value = '';
+  document.getElementById('inp-tar-rec').value = '';
   const btn = document.getElementById('btn-add-tarefa');
   btn.textContent = '➕ Adicionar Tarefa';
+  const titleEl = document.getElementById('lbl-tar-form-title');
+  if (titleEl) titleEl.textContent = '➕ Nova / Editar tarefa';
   document.getElementById('btn-cancel-edit').style.display = 'none';
 }
 
 async function addTarefa() {
-  const nome    = document.getElementById('inp-tar-nome').value.trim();
-  const icone   = document.getElementById('inp-tar-icone').value.trim() || '📋';
-  const deducao = parseFloat(document.getElementById('inp-tar-ded').value);
-  if (!nome || isNaN(deducao) || deducao < 0) return showToast('Preencha nome e dedução','error');
+  const nome = document.getElementById('inp-tar-nome').value.trim();
+  const icone = document.getElementById('inp-tar-icone').value.trim() || '📋';
+  const deducao = parseFloat(document.getElementById('inp-tar-ded').value) || 0;
+  const recInput = parseFloat(document.getElementById('inp-tar-rec').value);
+  const recompensa = !isNaN(recInput) ? recInput : deducao;
+
+  if (!nome) return showToast('Preencha o nome da tarefa', 'error');
   try {
     const btn = document.getElementById('btn-add-tarefa');
     btn.disabled = true;
-    
+
     if (editingTarefaId) {
-      await apiPost('/api/admin/tarefa',{acao:'editar',tarefa:{id:editingTarefaId,nome,icone,deducao}},currentPin);
-      showToast('Tarefa atualizada!','success');
+      await apiPost('/api/admin/tarefa', { acao: 'editar', tarefa: { id: editingTarefaId, nome, icone, deducao, recompensa } }, currentPin);
+      showToast('Tarefa atualizada!', 'success');
     } else {
-      await apiPost('/api/admin/tarefa',{acao:'adicionar',tarefa:{nome,icone,deducao}},currentPin);
-      showToast('Tarefa adicionada a todos os filhos!','success');
+      await apiPost('/api/admin/tarefa', { acao: 'adicionar', tarefa: { nome, icone, deducao, recompensa } }, currentPin);
+      showToast('Tarefa adicionada a todos os filhos!', 'success');
     }
-    
+
     editingTarefaId = null;
     await refresh();
     renderAdminTarefas();
-  } catch(e) { 
-    showToast(e.message,'error'); 
+  } catch (e) {
+    showToast(e.message, 'error');
     document.getElementById('btn-add-tarefa').disabled = false;
   }
 }
 
 async function toggleTarefaFilho(filho, tarefaId, ativo) {
   try {
-    const res = await apiPost('/api/admin/tarefa-filho',{filho,tarefaId,ativo},currentPin);
+    const res = await apiPost('/api/admin/tarefa-filho', { filho, tarefaId, ativo }, currentPin);
     state.tarefasAtivas = res.data.tarefasAtivas;
     showToast(
       ativo ? `Tarefa adicionada a ${filho}` : `Tarefa removida de ${filho}`,
@@ -740,25 +844,46 @@ async function toggleTarefaFilho(filho, tarefaId, ativo) {
     renderAdminTarefas();
     // Atualiza dashboard em background
     refresh();
-  } catch(e) { showToast(e.message,'error'); }
+  } catch (e) { showToast(e.message, 'error'); }
 }
 
 async function removeTarefa(id) {
   if (!confirm('Remover esta tarefa?')) return;
   try {
-    await apiPost('/api/admin/tarefa',{acao:'remover',tarefa:{id}},currentPin);
-    showToast('Tarefa removida','success');
+    await apiPost('/api/admin/tarefa', { acao: 'remover', tarefa: { id } }, currentPin);
+    showToast('Tarefa removida', 'success');
     await refresh();
     renderAdminTarefas();
-  } catch(e) { showToast(e.message,'error'); }
+  } catch (e) { showToast(e.message, 'error'); }
 }
 
 /* ── Aba Config ─────────────────────────────────────────────── */
 function renderAdminConfig() {
+  const modo = state.modoCalculo || 'fixo';
   document.getElementById('panel-config').innerHTML = `
     <div class="admin-form">
       <div class="form-group">
-        <label>💰 Valor máximo mensal (R$)</label>
+        <label>📊 Modo de cálculo do saldo</label>
+        <div style="display:flex; flex-direction:column; gap:10px; margin-top:6px; background:rgba(255,255,255,.03); padding:14px; border-radius:var(--radius-sm); border:1px solid var(--border-light);">
+          <label style="cursor:pointer; display:flex; align-items:flex-start; gap:10px;">
+            <input type="radio" name="cfg-modo" value="fixo" ${modo === 'fixo' ? 'checked' : ''} style="margin-top:3px; width:auto;">
+            <div>
+              <strong style="color:var(--text-1); font-size:.9rem;">🔒 Fixo com dedução (Padrão)</strong>
+              <div style="font-size:.78rem; color:var(--text-3); margin-top:2px;">O filho inicia o mês com o valor máximo total. Falhar em uma tarefa reduz o saldo final.</div>
+            </div>
+          </label>
+          <hr style="border:none; border-top:1px solid var(--border-light); margin:4px 0;">
+          <label style="cursor:pointer; display:flex; align-items:flex-start; gap:10px;">
+            <input type="radio" name="cfg-modo" value="acrescimo" ${modo === 'acrescimo' ? 'checked' : ''} style="margin-top:3px; width:auto;">
+            <div>
+              <strong style="color:var(--purple-light); font-size:.9rem;">💰 Acréscimo e dedução (Por tarefas cumpridas)</strong>
+              <div style="font-size:.78rem; color:var(--text-3); margin-top:2px;">O filho inicia o mês com R$ 0,00. Cumprir tarefas soma recompensas (+R$) e falhar reduz deduções (-R$).</div>
+            </div>
+          </label>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>💰 ${modo === 'acrescimo' ? 'Meta mensal (R$)' : 'Valor máximo mensal (R$)'}</label>
         <input id="cfg-valor" type="number" value="${state.valorMaximoMensal}"
                step="5" min="1" placeholder="Ex: 50">
       </div>
@@ -767,48 +892,33 @@ function renderAdminConfig() {
         <input id="cfg-pin" type="password" placeholder="4 dígitos" maxlength="4"
                inputmode="numeric">
         <small style="color:var(--text-3);font-size:.75rem">
-          ⚠️ O PIN é salvo no servidor / Firestore e não é exposto publicamente.
+          ⚠️ O PIN é salvo no arquivo .env do servidor e não é commitado no Git.
         </small>
       </div>
       <button class="btn-primary" onclick="saveConfig()">💾 Salvar Configurações</button>
-
-      <hr style="border:none;border-top:1px solid var(--border);margin:1.75rem 0 1.25rem 0">
-
-      <div class="form-group">
-        <label>📦 Backup e Migração de Dados</label>
-        <p style="color:var(--text-2);font-size:.82rem;margin-bottom:1rem;line-height:1.4">
-          Suba seu arquivo <code>dados.json</code> para o banco na nuvem ou baixe uma cópia de segurança a qualquer momento.
-        </p>
-        <div style="display:flex;gap:10px;flex-wrap:wrap">
-          <label class="btn-secondary" style="cursor:pointer;margin:0">
-            📥 Importar dados.json
-            <input type="file" id="import-file-input" accept=".json" style="display:none" onchange="importBackup(event)">
-          </label>
-          <button type="button" class="btn-secondary" onclick="exportBackup()">
-            📤 Exportar Backup
-          </button>
-        </div>
-      </div>
     </div>`;
 }
 
 async function saveConfig() {
-  const valor  = parseFloat(document.getElementById('cfg-valor').value);
-  const novoPin= document.getElementById('cfg-pin').value.trim();
-  const body   = {};
+  const modoRadio = document.querySelector('input[name="cfg-modo"]:checked');
+  const modoCalculo = modoRadio ? modoRadio.value : 'fixo';
+  const valor = parseFloat(document.getElementById('cfg-valor').value);
+  const novoPin = document.getElementById('cfg-pin').value.trim();
+  const body = { modoCalculo };
 
   if (!isNaN(valor) && valor > 0) body.valorMaximoMensal = valor;
   if (novoPin) {
-    if (!/^\d{4}$/.test(novoPin)) return showToast('PIN deve ter exatamente 4 dígitos','error');
+    if (!/^\d{4}$/.test(novoPin)) return showToast('PIN deve ter exatamente 4 dígitos', 'error');
     body.novoPin = novoPin;
   }
 
   try {
     await apiPost('/api/admin/config', body, currentPin);
     if (novoPin) currentPin = novoPin;
-    showToast('Configurações salvas!','success');
+    showToast('Configurações salvas!', 'success');
     await refresh();
-  } catch(e) { showToast(e.message,'error'); }
+    renderAdminConfig();
+  } catch (e) { showToast(e.message, 'error'); }
 }
 
 async function exportBackup() {
@@ -842,7 +952,7 @@ async function importBackup(e) {
     try {
       const json = JSON.parse(evt.target.result);
       const res  = await apiPost('/api/admin/importar', json, currentPin);
-      showToast(res.mensagem || 'Dados importados com sucesso!','success');
+      showToast(res.data?.mensagem || res.mensagem || 'Dados importados com sucesso!','success');
       await refresh();
       renderAdminConfig();
     } catch(err) {
@@ -860,21 +970,21 @@ async function importBackup(e) {
 
 /* ── Toast ──────────────────────────────────────────────────── */
 let toastTimer = null;
-function showToast(msg, type='info') {
+function showToast(msg, type = 'info') {
   const el = document.getElementById('toast');
   el.textContent = msg;
-  el.className   = `toast ${type} show`;
+  el.className = `toast ${type} show`;
   if (toastTimer) clearTimeout(toastTimer);
-  toastTimer = setTimeout(()=> el.classList.remove('show'), 3200);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 3200);
 }
 
 /* ── Segurança XSS ──────────────────────────────────────────── */
 function escapeHtml(s) {
   return String(s)
-    .replace(/&/g,'&amp;')
-    .replace(/</g,'&lt;')
-    .replace(/>/g,'&gt;')
-    .replace(/"/g,'&quot;');
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 }
 
 /* ── Teclado físico no PIN ──────────────────────────────────── */
@@ -887,7 +997,7 @@ document.addEventListener('keydown', e => {
 
   if (/^\d$/.test(e.key)) { pinPress(e.key); }
   else if (e.key === 'Backspace') { pinDel(); }
-  else if (e.key === 'Escape')    { closeAdminModal(); }
+  else if (e.key === 'Escape') { closeAdminModal(); }
 });
 
 /* ── Inicialização ──────────────────────────────────────────── */
@@ -899,7 +1009,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     updateHeader();
     renderDashboard();
     startAutoRefresh();
-  } catch(e) {
+  } catch (e) {
     document.getElementById('main-content').innerHTML = `
       <div class="error-state">
         <h2>⚠️ Erro ao conectar</h2>

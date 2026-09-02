@@ -803,6 +803,20 @@ input, select { font-family:inherit; }
 }
 .task-form-grid .btn-primary { grid-column:span 3; }
 
+.task-form-box {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 14px;
+}
+.form-row {
+  display: flex;
+  gap: 10px;
+}
+.flex-1 { flex: 1; }
+.flex-2 { flex: 2; }
+.has-reward { color: var(--success) !important; font-weight: 600; }
+
 /* Lista de tarefas com status */
 .task-checklist { display:flex; flex-direction:column; gap:8px; }
 .task-check-item {
