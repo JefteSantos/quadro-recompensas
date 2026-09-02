@@ -39,11 +39,17 @@ async function initFirebase() {
         serviceAccount = JSON.parse(fs.readFileSync(raw, 'utf8'));
       }
     } else {
-      // 2. Arquivo local padrão firebase-key.json
-      const localKeyPath = path.join(__dirname, 'firebase-key.json');
-      if (fs.existsSync(localKeyPath)) {
-        serviceAccount = JSON.parse(fs.readFileSync(localKeyPath, 'utf8'));
-      }
+      // 2. Procura automaticamente arquivo de credencial na pasta do projeto
+      try {
+        const files = fs.readdirSync(__dirname);
+        const keyFile = files.find(f => 
+          f.endsWith('.json') && (f.includes('adminsdk') || f.includes('firebase') || f === 'firebase-key.json')
+        );
+        if (keyFile) {
+          const localKeyPath = path.join(__dirname, keyFile);
+          serviceAccount = JSON.parse(fs.readFileSync(localKeyPath, 'utf8'));
+        }
+      } catch {}
     }
 
     if (serviceAccount) {
