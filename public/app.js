@@ -211,6 +211,24 @@ function renderDashboard() {
     <div class="dashboard-grid" id="dashboard-grid">
       ${state.filhos.map((filho, i) => buildChildCard(filho, i, mes, diaS, isCurrentMonth)).join('')}
     </div>`;
+
+  wireChildCards();
+}
+
+// Liga clique e navegação por teclado/D-pad (Enter/Espaço) nos cards.
+// Usa data-filho + listener delegado em vez de onclick inline para
+// não depender de escapar o nome do filho dentro de uma string JS.
+function wireChildCards() {
+  document.querySelectorAll('.child-card').forEach(card => {
+    const filho = card.dataset.filho;
+    card.addEventListener('click', () => openDetail(filho));
+    card.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        openDetail(filho);
+      }
+    });
+  });
 }
 
 function buildChildCard(filho, i, mes, diaS, isCurrentMonth) {
@@ -235,7 +253,9 @@ function buildChildCard(filho, i, mes, diaS, isCurrentMonth) {
     : `📅 Dia ${diaS} — ${fmtMonth(mes)}`;
 
   return `
-    <div class="child-card" id="card-${i}" onclick="openDetail('${filho.replace(/'/g, "\\'")}')">
+    <div class="child-card" id="card-${i}" tabindex="0" role="button"
+         aria-label="Ver calendário mensal de ${escapeHtml(filho)}"
+         data-filho="${escapeHtml(filho)}">
       <div class="card-glow" style="--glow-color:${cor}40"></div>
 
       <div class="card-header">
@@ -266,7 +286,7 @@ function buildChildCard(filho, i, mes, diaS, isCurrentMonth) {
             <div class="task-chip ${t.status === true ? 'done' : t.status === false ? 'missed' : ''}">
               <span class="task-icon">${t.icone}</span>
               <span class="task-name">${escapeHtml(t.nome)}</span>
-              <span class="task-status">${t.status === true ? '🟢' : t.status === false ? '🔴' : '⬜'}</span>
+              <span class="task-status"><span class="status-dot ${t.status === true ? 'is-done' : t.status === false ? 'is-missed' : 'is-pending'}"></span></span>
             </div>`).join('')}
         </div>
       </div>
@@ -395,7 +415,7 @@ function renderDetail(filho) {
       const st = Object.prototype.hasOwnProperty.call(r.reg, String(t.id))
         ? r.reg[String(t.id)] : undefined;
       return `<div class="grid-task-cell ${st === true ? 'done' : st === false ? 'missed' : 'pending'}">
-                          ${st === true ? '🟢' : st === false ? '🔴' : '⬜'}
+                          <span class="status-dot ${st === true ? 'is-done' : st === false ? 'is-missed' : 'is-pending'}"></span>
                         </div>`;
     }).join('')}
               <div class="grid-deduc-cell ${cellClass}">
@@ -576,11 +596,14 @@ function renderAdminRegister() {
               <span class="task-check-name">${escapeHtml(t.nome)}</span>
               <div class="status-toggle">
                 <button class="status-btn" id="sbtn-done-${t.id}"
-                        onclick="setStatus(${t.id},true)"  title="Cumpriu">🟢</button>
+                        onclick="setStatus(${t.id},true)"  title="Cumpriu" aria-label="Marcar como cumprida">
+                  <span class="status-dot is-done"></span></button>
                 <button class="status-btn" id="sbtn-miss-${t.id}"
-                        onclick="setStatus(${t.id},false)" title="Não cumpriu">🔴</button>
+                        onclick="setStatus(${t.id},false)" title="Não cumpriu" aria-label="Marcar como não cumprida">
+                  <span class="status-dot is-missed"></span></button>
                 <button class="status-btn" id="sbtn-clr-${t.id}"
-                        onclick="setStatus(${t.id},null)"  title="Sem registro">⬜</button>
+                        onclick="setStatus(${t.id},null)"  title="Sem registro" aria-label="Limpar registro">
+                  <span class="status-dot is-pending"></span></button>
               </div>
             </div>`).join('')}
         </div>
@@ -639,11 +662,14 @@ function rebuildTaskChecklist(filho) {
       <span class="task-check-name">${escapeHtml(t.nome)}</span>
       <div class="status-toggle">
         <button class="status-btn" id="sbtn-done-${t.id}"
-                onclick="setStatus(${t.id},true)"  title="Cumpriu">🟢</button>
+                onclick="setStatus(${t.id},true)"  title="Cumpriu" aria-label="Marcar como cumprida">
+          <span class="status-dot is-done"></span></button>
         <button class="status-btn" id="sbtn-miss-${t.id}"
-                onclick="setStatus(${t.id},false)" title="Não cumpriu">🔴</button>
+                onclick="setStatus(${t.id},false)" title="Não cumpriu" aria-label="Marcar como não cumprida">
+          <span class="status-dot is-missed"></span></button>
         <button class="status-btn" id="sbtn-clr-${t.id}"
-                onclick="setStatus(${t.id},null)"  title="Sem registro">⬜</button>
+                onclick="setStatus(${t.id},null)"  title="Sem registro" aria-label="Limpar registro">
+          <span class="status-dot is-pending"></span></button>
       </div>
     </div>`).join('');
 }

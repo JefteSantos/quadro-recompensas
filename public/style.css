@@ -299,7 +299,35 @@ input, select { font-family:inherit; }
 .task-chip.missed { background:var(--danger-bg);  border-color:rgba(239,68,68,.25); }
 .task-icon   { font-size:.95rem; flex-shrink:0; }
 .task-name   { flex:1; font-size:.82rem; color:var(--text-2); }
-.task-status { font-size:.82rem; flex-shrink:0; }
+.task-status { flex-shrink:0; }
+
+/* Indicador de status — desenhado em CSS puro (não emoji).
+   Alguns navegadores de Smart TV não têm fonte de emoji colorida
+   instalada e renderizam 🟢/🔴/⬜ em cinza/quebrado. */
+.status-dot {
+  display      : inline-block;
+  width        : 14px;
+  height       : 14px;
+  border-radius: 50%;
+  border       : 2px solid var(--border-light);
+  background   : transparent;
+  flex-shrink  : 0;
+  box-sizing   : border-box;
+}
+.status-dot.is-done {
+  background  : var(--success);
+  border-color: var(--success);
+  box-shadow  : 0 0 6px rgba(34,197,94,.5);
+}
+.status-dot.is-missed {
+  background  : var(--danger);
+  border-color: var(--danger);
+  box-shadow  : 0 0 6px rgba(239,68,68,.5);
+}
+.status-dot.is-pending {
+  background  : transparent;
+  border-color: var(--border-light);
+}
 
 .card-footer { border-top:1px solid var(--border-light); padding-top:16px; text-align:right; }
 .view-grid-btn { font-size:.78rem; color:var(--purple-light); transition:color var(--dur) var(--ease); }
@@ -438,6 +466,7 @@ input, select { font-family:inherit; }
 .grid-task-cell.done    { background:var(--success-bg); }
 .grid-task-cell.missed  { background:var(--danger-bg);  }
 .grid-task-cell.pending { background:transparent; }
+.grid-task-cell .status-dot { width:16px; height:16px; }
 
 .grid-deduc-cell {
   padding        : 10px 12px;
@@ -833,14 +862,17 @@ input, select { font-family:inherit; }
 
 .status-toggle { display:flex; gap:5px; }
 .status-btn {
+  display      : flex;
+  align-items  : center;
+  justify-content: center;
   background   : rgba(255,255,255,.05);
   border       : 1px solid var(--border-light);
   border-radius: 7px;
-  padding      : 5px 9px;
-  font-size    : 1rem;
+  padding      : 7px 11px;
   opacity      : .45;
   transition   : all .15s var(--ease);
 }
+.status-btn .status-dot { width:16px; height:16px; }
 .status-btn:hover  { opacity:.75; }
 .status-btn.active {
   opacity     : 1;
@@ -1011,4 +1043,43 @@ input, select { font-family:inherit; }
 .month-nav-today:hover {
   background : var(--gold);
   color      : #000;
+}
+
+/* ── Navegação por controle remoto / D-pad (Smart TV) ────────
+   O navegador da TV move o foco entre elementos focáveis quando
+   as setas do controle são usadas — sem um estilo de :focus
+   visível, fica impossível saber o que está selecionado.
+   Usamos :focus (não só :focus-visible) para garantir suporte
+   em navegadores de TV mais antigos. ───────────────────────── */
+.child-card:focus,
+.fab-admin:focus,
+.key-btn:focus,
+.tab-btn:focus,
+.month-nav-btn:focus,
+.month-nav-today:focus,
+.back-btn:focus,
+.status-btn:focus,
+.btn-primary:focus,
+.btn-primary-sm:focus,
+.btn-secondary:focus,
+.btn-danger-sm:focus,
+.view-grid-btn:focus,
+.modal-close:focus {
+  outline      : 3px solid var(--gold);
+  outline-offset: 3px;
+  box-shadow   : 0 0 0 6px var(--gold-glow);
+}
+
+.child-card:focus {
+  transform   : translateY(-6px);
+  border-color: var(--gold);
+}
+
+/* Remove o contorno padrão do navegador só quando o foco já
+   está sendo tratado visualmente acima, evitando contorno duplo */
+.child-card,
+.status-btn,
+.month-nav-btn,
+.view-grid-btn {
+  outline: none;
 }
